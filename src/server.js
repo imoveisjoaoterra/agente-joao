@@ -1,0 +1,100 @@
+require('dotenv').config()
+const express = require('express')
+const { processMessage } = require('./agent')
+const { normalizePhone, resolveLid } = require('./evolution')
+
+const app = express()
+app.use(express.json())
+
+const PORT = process.env.PORT || 3000
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'online',
+    agent: 'João Terra Imóveis v2.0',
+    timestamp: new Date().toISOString()
+  })
+})
+
+// Webhook principal — Evolution API
+app.post('/webhook', async (req, res) => {
+  // Responde 200 imediatamente para a Evolution não retentar
+  res.status(200).json({ received: true })
+
+  try {
+    const payload = req.body
+
+    // Filtra apenas mensagens de texto recebidas
+    const event = payload.event
+    if (event !== 'messages.upsert') return
+
+    const message = payload.data
+    if (!message) return
+
+    // Ignora mensagens enviadas pelo próprio número (evita loop)
+    if (message.key?.fromMe === true) return
+
+    // Extrai texto da mensagem
+    const text =
+      message.message?.conversation ||
+      message.message?.extendedTextMessage?.text ||
+      message.message?.buttonsResponseMessage?.selectedDisplayText
+
+    if (!text || text.trim() === '') return
+
+    // Extrai número do remetente
+    let remoteJid = message.key?.remoteJid || ''
+    const pushName = message.pushName || ''
+
+    // Resolve @lid se necessário
+    if (remoteJid.includes('@lid')) {
+      console.warn(`[Webhook] @lid detectado: ${remoteJid} (${pushName})`)
+      const resolved = await resolveLid(remoteJid, pushName)
+      if (resolved) {
+        remoteJid = `${resolved}@s.whatsapp.net`
+        console.log(`[Webhook] @lid resolvido para: ${resolved}`)
+      } else {
+        console.error(`[Webhook] Não foi possível resolver @lid — mensagem ignorada`)
+        return
+      }
+    }
+
+    // Normaliza o número
+    const phone = normalizePhone(remoteJid)
+    if (!phone) {
+      console.error(`[Webhook] Número inválido após normalização: ${remoteJid}`)
+      return
+    }
+
+    console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
+
+    // Processa a mensagem no agente
+    await processMessage(phone, text)
+
+  } catch (err) {
+    console.error('[Webhook] Erro ao processar mensagem:', err.message)
+  }
+})
+
+// Endpoint de teste manual (desenvolvimento)
+app.post('/test', async (req, res) => {
+  const { phone, message } = req.body
+  if (!phone || !message) {
+    return res.status(400).json({ error: 'phone e message são obrigatórios' })
+  }
+
+  try {
+    const response = await processMessage(phone, message)
+    res.json({ success: true, response })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.listen(PORT, () => {
+  console.log(`[Servidor] Agente João Terra Imóveis v2.0 rodando na porta ${PORT}`)
+  console.log(`[Servidor] Webhook: POST /webhook`)
+  console.log(`[Servidor] Health: GET /health`)
+  console.log(`[Servidor] Teste: POST /test`)
+})
