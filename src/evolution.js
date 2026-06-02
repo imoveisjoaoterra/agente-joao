@@ -11,22 +11,22 @@ const headers = {
   'Content-Type': 'application/json'
 }
 
-// Normaliza número: remove @s.whatsapp.net, @lid, etc.
+// Normaliza número: remove @s.whatsapp.net, @c.us
+// Para @lid mantém o JID completo — Evolution API consegue enviar direto
 function normalizePhone(raw) {
   if (!raw) return null
-  let phone = raw
-    .replace('@s.whatsapp.net', '')
-    .replace('@c.us', '')
-    .trim()
+  let phone = raw.trim()
 
-  // Se contém @lid, não conseguimos resolver aqui — retorna null
+  // @lid — usa o JID completo diretamente
   if (phone.includes('@lid')) {
-    console.warn(`[Evolution] Número @lid não resolvido: ${raw}`)
-    return null
+    return phone
   }
 
-  // Remove caracteres não numéricos
-  phone = phone.replace(/\D/g, '')
+  // Remove sufixos comuns
+  phone = phone
+    .replace('@s.whatsapp.net', '')
+    .replace('@c.us', '')
+    .replace(/\D/g, '')
 
   // Garante código do país Brasil
   if (phone.length === 11 && !phone.startsWith('55')) {
@@ -44,7 +44,8 @@ async function sendWhatsAppMessage(phone, text) {
     return false
   }
 
-  const number = `${normalized}@s.whatsapp.net`
+  // Se já tem @ (ex: @lid ou @s.whatsapp.net), usa direto; senão adiciona sufixo
+  const number = normalized.includes('@') ? normalized : `${normalized}@s.whatsapp.net`
 
   try {
     const response = await axios.post(
