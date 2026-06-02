@@ -45,16 +45,11 @@ app.post('/webhook', async (req, res) => {
 
     // Log completo para debug de @lid
     if (message.key?.remoteJid?.includes('@lid')) {
-      console.log('[Debug @lid] Payload completo:', JSON.stringify({
-        remoteJid: message.key?.remoteJid,
-        pushName: message.pushName,
-        participant: message.key?.participant,
-        sender: message.sender,
-        from: message.from,
-        phoneNumber: message.phoneNumber,
-        contact: message.contact,
-        broadcast: message.broadcast,
-      }, null, 2))
+      const keys = Object.keys(message)
+      console.log('[Debug @lid] Campos disponíveis:', keys.join(', '))
+      console.log('[Debug @lid] pushName:', message.pushName)
+      console.log('[Debug @lid] key:', JSON.stringify(message.key))
+      console.log('[Debug @lid] messageStubParameters:', message.messageStubParameters)
     }
 
     // Extrai número do remetente
