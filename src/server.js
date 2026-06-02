@@ -44,27 +44,23 @@ app.post('/webhook', async (req, res) => {
     if (!text || text.trim() === '') return
 
     // Extrai número do remetente
-    let remoteJid = message.key?.remoteJid || ''
+    const remoteJid = message.key?.remoteJid || ''
     const pushName = message.pushName || ''
 
-    // Resolve @lid se necessário
-    if (remoteJid.includes('@lid')) {
-      console.warn(`[Webhook] @lid detectado: ${remoteJid} (${pushName})`)
-      const resolved = await resolveLid(remoteJid, pushName)
-      if (resolved) {
-        remoteJid = `${resolved}@s.whatsapp.net`
-        console.log(`[Webhook] @lid resolvido para: ${resolved}`)
-      } else {
-        console.error(`[Webhook] Não foi possível resolver @lid — mensagem ignorada`)
-        return
-      }
+    if (!remoteJid) {
+      console.error('[Webhook] remoteJid ausente — mensagem ignorada')
+      return
     }
 
-    // Normaliza o número
+    // Normaliza o número (@lid é passado diretamente para a Evolution API)
     const phone = normalizePhone(remoteJid)
     if (!phone) {
       console.error(`[Webhook] Número inválido após normalização: ${remoteJid}`)
       return
+    }
+
+    if (remoteJid.includes('@lid')) {
+      console.log(`[Webhook] @lid detectado — usando JID direto: ${phone} (${pushName})`)
     }
 
     console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
