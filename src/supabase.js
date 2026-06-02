@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
+const ws = require('ws')
 
 // Criação lazy — garante que as variáveis já estão disponíveis
 let _supabase = null
@@ -9,7 +10,10 @@ function getClient() {
     if (!url || !key) {
       throw new Error(`Supabase não configurado. URL: ${url ? 'ok' : 'FALTANDO'} | KEY: ${key ? 'ok' : 'FALTANDO'}`)
     }
-    _supabase = createClient(url, key)
+    _supabase = createClient(url, key, {
+      global: { headers: {} },
+      realtime: { transport: ws }
+    })
   }
   return _supabase
 }
