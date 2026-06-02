@@ -1,13 +1,22 @@
 const { createClient } = require('@supabase/supabase-js')
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-)
+// Criação lazy — garante que as variáveis já estão disponíveis
+let _supabase = null
+function getClient() {
+  if (!_supabase) {
+    const url = process.env.SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_KEY
+    if (!url || !key) {
+      throw new Error(`Supabase não configurado. URL: ${url ? 'ok' : 'FALTANDO'} | KEY: ${key ? 'ok' : 'FALTANDO'}`)
+    }
+    _supabase = createClient(url, key)
+  }
+  return _supabase
+}
 
 // Busca sessão pelo número de telefone
 async function getSession(phone) {
-  const { data, error } = await supabase
+  const { data, error } = await getClient()
     .from('sessions')
     .select('*')
     .eq('phone', phone)
@@ -23,7 +32,7 @@ async function getSession(phone) {
 
 // Cria nova sessão
 async function createSession(phone) {
-  const { data, error } = await supabase
+  const { data, error } = await getClient()
     .from('sessions')
     .insert({
       phone,
@@ -46,7 +55,7 @@ async function createSession(phone) {
 
 // Atualiza sessão existente
 async function updateSession(phone, updates) {
-  const { data, error } = await supabase
+  const { data, error } = await getClient()
     .from('sessions')
     .update({
       ...updates,
