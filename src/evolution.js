@@ -50,7 +50,7 @@ async function sendWhatsAppMessage(phone, text) {
   try {
     const response = await axios.post(
       `${EVOLUTION_URL}/message/sendText/${INSTANCE}`,
-      { number, text },
+      { number, textMessage: { text } },
       { headers }
     )
 
