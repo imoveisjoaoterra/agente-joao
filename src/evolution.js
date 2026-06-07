@@ -85,15 +85,18 @@ async function resolveLid(lidJid, pushName) {
   if (!lidJid.includes('@lid')) return null
 
   try {
-    // Busca lista de contatos e cruza pelo pushName
-    const response = await axios.get(
+    // Endpoint correto é POST com corpo { where: {...} } — não GET com query
+    // params (era a causa do 404 anterior). Doc oficial:
+    // https://doc.evolution-api.com/v2/api-reference/chat-controller/find-contacts
+    const response = await axios.post(
       `${EVOLUTION_URL}/chat/findContacts/${INSTANCE}`,
-      { headers, params: { where: JSON.stringify({ pushName }) } }
+      { where: { pushName } },
+      { headers }
     )
 
     const contacts = response.data
-    if (contacts && contacts.length > 0) {
-      const contact = contacts.find(c => c.pushName === pushName)
+    if (Array.isArray(contacts) && contacts.length > 0) {
+      const contact = contacts.find(c => c.pushName === pushName) || contacts[0]
       if (contact && contact.id) {
         return contact.id.replace('@s.whatsapp.net', '')
       }
