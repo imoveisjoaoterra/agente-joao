@@ -63,6 +63,10 @@ async function sendWhatsAppMessage(phone, text) {
     return false
   } catch (err) {
     console.error(`[Evolution] Erro ao enviar mensagem: ${err.message}`)
+    if (err.response) {
+      console.error(`[Evolution] Detalhes do erro (status ${err.response.status}): ${JSON.stringify(err.response.data)}`)
+      console.error(`[Evolution] Payload enviado: ${JSON.stringify({ number, text })}`)
+    }
     return false
   }
 }
