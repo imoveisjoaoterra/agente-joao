@@ -1,7 +1,7 @@
 require('dotenv').config()
 const Anthropic = require('@anthropic-ai/sdk')
 const { buildContextPrompt } = require('../prompts/system-prompt')
-const { getOrCreateSession, updateSession, addMessage } = require('./supabase')
+const { getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -12,6 +12,10 @@ const STATES = {
   TRIAGEM: 'TRIAGEM',
   FORA_PERFIL: 'FORA_PERFIL',
   APRESENTACAO: 'APRESENTACAO',
+  // Estado próprio para quem quer COMPRAR — não passa por fiança/CPF
+  // (esse fluxo é exclusivo de aluguel). Ver achado 1 do QA em
+  // 06_OUTPUTS/2026-06-07_agente-imoveis-whatsapp/qa-revisao-fluxo-conversa.md
+  INTERESSE_VENDA: 'INTERESSE_VENDA',
   GARANTIA: 'GARANTIA',
   AGUARDANDO_CPF: 'AGUARDANDO_CPF',
   NOTIFICA_JOAO: 'NOTIFICA_JOAO',
@@ -23,8 +27,11 @@ const STATES = {
 
 // Detecta se deve acionar João
 function shouldEscalateToJoao(text, state) {
+  // Gatilhos de alta intenção (ver achado 3 do QA — removidos 'quero ver' e
+  // 'ver o imóvel' por se sobreporem a wantsToSeeProperties e gerarem
+  // alerta em excesso para quem só está navegando opções)
   const triggers = [
-    'visitar', 'visita', 'agendar', 'quero ver', 'ver o imóvel',
+    'visitar', 'visita', 'agendar',
     'falar com joão', 'falar com o joão', 'responsável', 'negociar',
     'desconto', 'reduzir', 'valor menor'
   ]
@@ -37,6 +44,32 @@ function extractCPF(text) {
   const cpfRegex = /\b\d{3}[\.\s-]?\d{3}[\.\s-]?\d{3}[\.\s-]?\d{2}\b/
   const match = text.match(cpfRegex)
   return match ? match[0].replace(/[\.\s-]/g, '') : null
+}
+
+// Detecta se o cliente quer ALUGAR ou COMPRAR — define qual ramo de
+// conversa seguir (locação com fiança/CPF, ou venda com handoff direto)
+function extractFinalidade(text, currentFinalidade) {
+  if (currentFinalidade) return currentFinalidade
+  const lower = text.toLowerCase()
+
+  if (/\b(alugar|aluguel|locar|locação|loca[cç][aã]o)\b/.test(lower)) return 'aluguel'
+  if (/\b(comprar|compra|à venda|a venda|vender|financiar|financiamento|adquirir)\b/.test(lower)) return 'venda'
+
+  return null
+}
+
+// Detecta se o cliente está pedindo explicitamente para ver opções de imóveis
+// (a busca só roda quando isso for verdade — decisão registrada em
+// 07_LOGS/decisions.md, 2026-06-07)
+function wantsToSeeProperties(text) {
+  const lower = text.toLowerCase()
+  const triggers = [
+    'pode mandar', 'manda', 'mostra', 'tem algo', 'tem alguma', 'tem opç',
+    'quero ver', 'pode ver', 'tem disponível', 'tem disponivel',
+    'tem imóve', 'tem imove', 'opções disponíve', 'opcoes disponive',
+    'me mostra', 'pode enviar', 'fotos'
+  ]
+  return triggers.some(t => lower.includes(t))
 }
 
 // Detecta próximo estado com base na mensagem e estado atual
@@ -57,10 +90,14 @@ function detectNextState(text, currentState, profile) {
   }
 
   if (currentState === STATES.APRESENTACAO) {
-    if (lower.includes('gostei') || lower.includes('interesse') ||
+    const showsInterest = lower.includes('gostei') || lower.includes('interesse') ||
         lower.includes('quero') || lower.includes('esse') ||
-        lower.includes('visitar') || lower.includes('ver')) {
-      return STATES.GARANTIA
+        lower.includes('visitar') || lower.includes('ver')
+
+    if (showsInterest) {
+      // Ramificação por finalidade: fiança/CPF é exclusivo de ALUGUEL.
+      // Quem quer COMPRAR vai para um estado próprio, sem esse fluxo.
+      return profile.finalidade === 'venda' ? STATES.INTERESSE_VENDA : STATES.GARANTIA
     }
   }
 
@@ -83,12 +120,18 @@ function extractProfileData(text, currentProfile) {
   const lower = text.toLowerCase()
   const updated = { ...currentProfile }
 
-  // Tipo de imóvel
+  // Tipo de imóvel (ampliado para cobrir todos os tipos do site: terreno e comercial)
   if (!updated.tipo) {
-    if (lower.includes('casa')) updated.tipo = 'casa'
+    if (lower.includes('casa') || lower.includes('sobrado')) updated.tipo = 'casa'
     else if (lower.includes('apartamento') || lower.includes('apto')) updated.tipo = 'apartamento'
-    else if (lower.includes('kitnet') || lower.includes('studio')) updated.tipo = 'kitnet'
+    else if (lower.includes('kitnet') || lower.includes('studio') || lower.includes('estúdio')) updated.tipo = 'kitnet'
+    else if (lower.includes('terreno') || lower.includes('lote')) updated.tipo = 'terreno'
+    else if (lower.includes('comercial') || lower.includes('sala comercial') || lower.includes('loja') || lower.includes('galpão') || lower.includes('galpao') || lower.includes('ponto comercial')) updated.tipo = 'comercial'
   }
+
+  // Finalidade (compra ou aluguel) — define o ramo de conversa
+  const finalidade = extractFinalidade(text, currentProfile.finalidade)
+  if (finalidade) updated.finalidade = finalidade
 
   // Quartos
   if (!updated.quartos) {
@@ -129,12 +172,28 @@ async function processMessage(phone, userMessage) {
   // Verifica se deve acionar João
   const escalate = shouldEscalateToJoao(userMessage, nextState)
 
+  // Busca imóveis SOMENTE quando o cliente pedir explicitamente
+  // (decisão registrada em 07_LOGS/decisions.md, 2026-06-07 — evita
+  // "empurrar" lista sem o cliente ter pedido)
+  let imoveis
+  if (wantsToSeeProperties(userMessage)) {
+    imoveis = await searchImoveis({
+      tipo: updatedProfile.tipo,
+      quartos: updatedProfile.quartos,
+      regiao: updatedProfile.regiao,
+      orcamento: updatedProfile.orcamento,
+      finalidade: updatedProfile.finalidade
+    })
+    console.log(`[Agente] Cliente pediu para ver imóveis — encontrados: ${imoveis.length}`)
+  }
+
   // Monta contexto para o Claude
   const contextualPrompt = buildContextPrompt({
     ...session,
     state: nextState,
     profile: updatedProfile,
-    messages: [...(session.messages || []), { role: 'user', content: userMessage }]
+    messages: [...(session.messages || []), { role: 'user', content: userMessage }],
+    imoveis
   })
 
   // Chama o Claude

@@ -104,10 +104,40 @@ async function getOrCreateSession(phone) {
   return session
 }
 
+// Busca imóveis disponíveis que combinam com o perfil do cliente
+// (tabela "imoveis" — espelha os imóveis cadastrados no site joao-terra-site,
+// sincronizados via scripts/add-property.mjs. Ver schema em
+// 06_OUTPUTS/2026-06-07_agente-imoveis-whatsapp/schema-supabase-imoveis.sql)
+async function searchImoveis({ tipo, quartos, regiao, orcamento, finalidade } = {}) {
+  const purpose = finalidade === 'venda' ? 'venda' : 'aluguel'
+
+  let query = getClient()
+    .from('imoveis')
+    .select('*')
+    .eq('status', 'disponivel')
+    .eq('purpose', purpose)
+    .limit(3)
+
+  if (tipo) query = query.eq('type', tipo)
+  if (quartos) query = query.gte('bedrooms', Number(quartos))
+  if (regiao) query = query.ilike('neighborhood_name', `%${regiao}%`)
+  if (orcamento) query = query.lte('price', Number(orcamento))
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('[Supabase] Erro ao buscar imóveis:', error.message)
+    return []
+  }
+
+  return data || []
+}
+
 module.exports = {
   getSession,
   createSession,
   updateSession,
   addMessage,
-  getOrCreateSession
+  getOrCreateSession,
+  searchImoveis
 }
