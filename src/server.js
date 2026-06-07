@@ -62,14 +62,24 @@ app.post('/webhook', async (req, res) => {
     }
 
     // Normaliza o número (@lid é passado diretamente para a Evolution API)
-    const phone = normalizePhone(remoteJid)
+    let phone = normalizePhone(remoteJid)
     if (!phone) {
       console.error(`[Webhook] Número inválido após normalização: ${remoteJid}`)
       return
     }
 
+    // @lid não é um JID válido para ENVIO (a Evolution API recebe mensagens
+    // dele, mas reporta "exists: false" ao tentar mandar de volta — erro 400
+    // visto em produção em 2026-06-07). Tenta resolver para o número de
+    // telefone real via lista de contatos antes de seguir.
     if (remoteJid.includes('@lid')) {
-      console.log(`[Webhook] @lid detectado — usando JID direto: ${phone} (${pushName})`)
+      const resolved = await resolveLid(remoteJid, pushName)
+      if (resolved) {
+        console.log(`[Webhook] @lid resolvido para número real: ${resolved} (${pushName})`)
+        phone = resolved
+      } else {
+        console.log(`[Webhook] @lid não resolvido — seguindo com JID direto (envio pode falhar): ${phone} (${pushName})`)
+      }
     }
 
     console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
