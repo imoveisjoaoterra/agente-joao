@@ -38,6 +38,9 @@ app.post('/webhook', async (req, res) => {
     // Ignora mensagens enviadas pelo próprio número (evita loop)
     if (message.key?.fromMe === true) return
 
+    // Ignora mensagens de grupos (@g.us)
+    if (message.key?.remoteJid?.endsWith('@g.us')) return
+
     // Extrai texto da mensagem
     let text =
       message.message?.conversation ||
