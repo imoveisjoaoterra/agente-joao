@@ -58,19 +58,17 @@ async function applyLabel(phone, state) {
     // Remove etiquetas de fluxo existentes
     for (const labelId of [...new Set(flowLabelIds)]) {
       if (labelId === newLabelId) continue
-      await axios.delete(
+      await axios.post(
         `${EVOLUTION_URL}/label/handleLabel/${INSTANCE}`,
-        {
-          headers,
-          data: { number: remoteJid, labelId }
-        }
-      ).catch(() => {}) // ignora erro se etiqueta não estava aplicada
+        { number: remoteJid, labelId, action: 'remove' },
+        { headers }
+      ).catch(() => {})
     }
 
     // Aplica nova etiqueta
     await axios.post(
       `${EVOLUTION_URL}/label/handleLabel/${INSTANCE}`,
-      { number: remoteJid, labelId: newLabelId },
+      { number: remoteJid, labelId: newLabelId, action: 'add' },
       { headers }
     )
 
