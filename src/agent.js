@@ -171,15 +171,92 @@ function detectNextState(text, currentState, profile) {
   return currentState
 }
 
+// Extrai nome do cliente da mensagem (quando estado é AGUARDANDO_NOME)
+function extractNome(text) {
+  const trimmed = text.trim()
+  // Padrões como "sou João", "me chamo Maria", "meu nome é Pedro"
+  const patterns = [
+    /(?:sou|me chamo|meu nome é|meu nome e|pode me chamar de)\s+([A-ZÀ-Ú][a-záàâãéèêíìîóòôõúùûç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíìîóòôõúùûç]+)*)/i,
+    /^([A-ZÀ-Ú][a-záàâãéèêíìîóòôõúùûç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíìîóòôõúùûç]+){0,3})$/
+  ]
+  for (const pat of patterns) {
+    const match = trimmed.match(pat)
+    if (match) {
+      const candidate = match[1].trim()
+      // Descarta se parece uma frase (mais de 4 palavras ou começa com artigo)
+      const words = candidate.split(' ')
+      if (words.length <= 4 && !/^(o |a |os |as |de |da |do )/i.test(candidate)) {
+        return candidate
+      }
+    }
+  }
+  return null
+}
+
+// Extrai orçamento da mensagem
+function extractOrcamento(text) {
+  const lower = text.toLowerCase()
+  // "300mil", "300k", "R$ 1.200", "1200 reais", "até 800", etc.
+  const patterns = [
+    /r\$\s*([\d.,]+)\s*(?:mil)?/i,
+    /([\d.,]+)\s*mil(?:\s*reais)?/i,
+    /([\d.,]+)\s*k\b/i,
+    /até\s*([\d.,]+)/i,
+    /em torno de\s*([\d.,]+)/i,
+    /([\d.]+)\s*reais/i
+  ]
+  for (const pat of patterns) {
+    const match = text.match(pat)
+    if (match) {
+      let val = match[1].replace(/\./g, '').replace(',', '.')
+      const num = parseFloat(val)
+      if (!isNaN(num)) {
+        // Normaliza: "1200" provavelmente é 1200 (aluguel), "300" com "mil" é 300000
+        if (lower.includes('mil') || lower.includes('k')) return String(num * 1000)
+        return String(num)
+      }
+    }
+  }
+  return null
+}
+
+// Extrai região/bairro da mensagem
+function extractRegiao(text) {
+  const lower = text.toLowerCase()
+  const regioes = [
+    { pattern: /\b(zn|zona norte|norte)\b/, value: 'Zona Norte' },
+    { pattern: /\b(zs|zona sul|sul)\b/, value: 'Zona Sul' },
+    { pattern: /\b(zl|zona leste|leste)\b/, value: 'Zona Leste' },
+    { pattern: /\b(zo|zona oeste|oeste)\b/, value: 'Zona Oeste' },
+    { pattern: /\b(centro)\b/, value: 'Centro' },
+    { pattern: /\b(gleba palhano|palhano)\b/, value: 'Zona Sul' },
+    { pattern: /\b(catuaí|catuai)\b/, value: 'Zona Sul' },
+    { pattern: /\b(cafezal)\b/, value: 'Zona Norte' },
+    { pattern: /\b(heimtal)\b/, value: 'Zona Norte' },
+    { pattern: /\b(lindóia|lindoia)\b/, value: 'Zona Norte' },
+    { pattern: /\b(cinco conjuntos)\b/, value: 'Zona Norte' },
+  ]
+  for (const r of regioes) {
+    if (r.pattern.test(lower)) return r.value
+  }
+  return null
+}
+
 // Extrai dados de perfil da mensagem
-function extractProfileData(text, currentProfile) {
+function extractProfileData(text, currentProfile, currentState) {
   const lower = text.toLowerCase()
   const updated = { ...currentProfile }
+
+  // Nome — captura quando estiver aguardando nome
+  if (!updated.nome && currentState === STATES.AGUARDANDO_NOME) {
+    const nome = extractNome(text)
+    if (nome) updated.nome = nome
+  }
 
   // Tipo de imóvel (ampliado para cobrir todos os tipos do site: terreno e comercial)
   if (!updated.tipo) {
     if (lower.includes('casa') || lower.includes('sobrado')) updated.tipo = 'casa'
-    else if (lower.includes('apartamento') || lower.includes('apto')) updated.tipo = 'apartamento'
+    else if (lower.includes('apartamento') || lower.includes('apto') || lower.includes('apê') || lower.includes('ape')) updated.tipo = 'apartamento'
     else if (lower.includes('kitnet') || lower.includes('studio') || lower.includes('estúdio')) updated.tipo = 'kitnet'
     else if (lower.includes('terreno') || lower.includes('lote')) updated.tipo = 'terreno'
     else if (lower.includes('comercial') || lower.includes('sala comercial') || lower.includes('loja') || lower.includes('galpão') || lower.includes('galpao') || lower.includes('ponto comercial')) updated.tipo = 'comercial'
@@ -195,7 +272,20 @@ function extractProfileData(text, currentProfile) {
     if (quartosMatch) updated.quartos = quartosMatch[1]
     else if (lower.includes('1 quarto') || lower.includes('um quarto')) updated.quartos = '1'
     else if (lower.includes('2 quartos') || lower.includes('dois quartos')) updated.quartos = '2'
-    else if (lower.includes('3 quartos') || lower.includes('três quartos')) updated.quartos = '3'
+    else if (lower.includes('3 quartos') || lower.includes('três quartos') || lower.includes('tres quartos')) updated.quartos = '3'
+    else if (lower.includes('4 quartos') || lower.includes('quatro quartos')) updated.quartos = '4'
+  }
+
+  // Região — extrai de abreviações e nomes de bairros/zonas
+  if (!updated.regiao) {
+    const regiao = extractRegiao(text)
+    if (regiao) updated.regiao = regiao
+  }
+
+  // Orçamento
+  if (!updated.orcamento) {
+    const orcamento = extractOrcamento(text)
+    if (orcamento) updated.orcamento = orcamento
   }
 
   // CPF
@@ -217,13 +307,14 @@ async function processMessage(phone, userMessage) {
     return null
   }
 
-  // Novo lead — cria linha na planilha
+  // Novo lead — cria linha na planilha (com nome se já vier na 1ª mensagem)
   if (isNewSession) {
-    await addLead({ phone, nome: '', origem: 'WhatsApp' })
+    const nomeInicial = extractNome(userMessage) || ''
+    await addLead({ phone, nome: nomeInicial, origem: 'WhatsApp' })
   }
 
-  // Extrai dados de perfil da mensagem
-  const updatedProfile = extractProfileData(userMessage, session.profile || {})
+  // Extrai dados de perfil da mensagem (passa estado atual para captura de nome)
+  const updatedProfile = extractProfileData(userMessage, session.profile || {}, session.state)
 
   // Detecta próximo estado
   const nextState = detectNextState(userMessage, session.state, updatedProfile)
@@ -271,7 +362,7 @@ async function processMessage(phone, userMessage) {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 400,
-      system: contextualPrompt + `\n\nSe não tiver informação suficiente para responder com precisão, responda EXATAMENTE com o texto: [AGUARDANDO_JOAO] seguido da mensagem pro cliente (ex: "[AGUARDANDO_JOAO] Deixa eu verificar aqui pra você. Só um momento! 😊"). Não use essa marcação em situações normais — só quando genuinamente precisar de uma informação que não tem.`,
+      system: contextualPrompt + `\n\nREGRAS CRÍTICAS:\n1. Se não houver imóveis na lista do contexto (lista vazia ou ausente), responda OBRIGATORIAMENTE com [AGUARDANDO_JOAO] + mensagem curta. Ex: "[AGUARDANDO_JOAO] Não encontrei nada com esse perfil agora, mas vou verificar e te retorno em breve."\n2. Se faltar informação para responder com precisão, use [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Deixa eu verificar aqui e te retorno rapidinho."\n3. NUNCA mencione imóveis que não estão na lista fornecida. NUNCA invente links. Use [AGUARDANDO_JOAO] se não tiver opções.\n4. NUNCA repita o nome do cliente nas mensagens.\n5. Respostas máximo 2 frases. Sem emojis.`,
       messages: [{ role: 'user', content: userMessage }]
     })
     const raw = response.content[0].text
