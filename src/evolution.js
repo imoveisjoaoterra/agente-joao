@@ -36,6 +36,13 @@ function normalizePhone(raw) {
   return phone
 }
 
+// Calcula delay de digitação em ms com base no tamanho da mensagem
+// ~30ms por caractere, mínimo 1500ms, máximo 8000ms
+function typingDelay(text) {
+  const ms = text.length * 30
+  return Math.min(Math.max(ms, 1500), 8000)
+}
+
 // Envia mensagem de texto via Evolution API
 async function sendWhatsAppMessage(phone, text) {
   const normalized = normalizePhone(phone)
@@ -46,11 +53,12 @@ async function sendWhatsAppMessage(phone, text) {
 
   // Se já tem @ (ex: @lid ou @s.whatsapp.net), usa direto; senão adiciona sufixo
   const number = normalized.includes('@') ? normalized : `${normalized}@s.whatsapp.net`
+  const delay = typingDelay(text)
 
   try {
     const response = await axios.post(
       `${EVOLUTION_URL}/message/sendText/${INSTANCE}`,
-      { number, text },
+      { number, text, options: { delay, presence: 'composing' } },
       { headers }
     )
 

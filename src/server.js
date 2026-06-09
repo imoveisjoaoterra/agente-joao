@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const { processMessage } = require('./agent')
 const { normalizePhone, resolveLid } = require('./evolution')
+const { getSession } = require('./supabase')
 
 const app = express()
 app.use(express.json())
@@ -80,6 +81,13 @@ app.post('/webhook', async (req, res) => {
       } else {
         console.log(`[Webhook] @lid não resolvido — seguindo com JID direto (envio pode falhar): ${phone} (${pushName})`)
       }
+    }
+
+    // Filtra: só atende primeiro contato absoluto (sem sessão prévia no Supabase)
+    const existingSession = await getSession(phone)
+    if (existingSession) {
+      console.log(`[Webhook] Número ${phone} já tem sessão — ignorado (não é primeiro contato)`)
+      return
     }
 
     console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
