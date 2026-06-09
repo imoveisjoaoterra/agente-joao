@@ -104,6 +104,62 @@ async function getOrCreateSession(phone) {
   return session
 }
 
+// Mapa de regiões de Londrina → bairros pertencentes à zona
+// Usado para ampliar a busca além do nome exato da região
+const BAIRROS_POR_ZONA = {
+  'Centro': [
+    'Centro', 'Centro Cívico', 'Vila Nova', 'Jardim Agari', 'Jardim Higienópolis',
+    'Jardim Higienopolis', 'Bela Suíça', 'Bela Suica', 'Calçada', 'Calcada',
+    'Vilas do Arvoredo', 'Vila Casoni', 'Palhano', 'Gleba Palhano'
+  ],
+  'Zona Norte': [
+    'Zona Norte', 'Cafezal', 'Jardim Cafezal', 'Heimtal', 'Cinco Conjuntos',
+    'Lindóia', 'Lindoia', 'Conjunto Vivi Xavier', 'Jardim do Sol',
+    'Jardim Piza', 'Parigot de Souza', 'Ana Botelho', 'Ernani Moura Lima',
+    'Colinas', 'Jardim Colinas', 'Novo Bandeirantes', 'Bandeirantes',
+    'Interlagos', 'Jardim Interlagos', 'Igapó', 'Igapo', 'União da Vitória',
+    'Uniao da Vitoria', 'Antonio Zanello', 'São Luiz', 'Sao Luiz',
+    'Pacaembu', 'Jardim Pacaembu'
+  ],
+  'Zona Sul': [
+    'Zona Sul', 'Gleba Palhano', 'Palhano', 'Alto da Boa Vista',
+    'Royal Park', 'Catuaí', 'Catuai', 'Jardim do Pão', 'Jardim do Pao',
+    'Antares', 'Conjunto Habitacional', 'Patrimônio', 'Patrimonio',
+    'Vale do Sol', 'Jardim Petrópolis', 'Jardim Petropolis',
+    'Tucanos', 'Jardim Tucanos', 'Caminhos do Sol', 'Portal do Sol',
+    'Morumbi', 'Jardim Morumbi', 'Lerroville', 'Espírito Santo', 'Espirito Santo'
+  ],
+  'Zona Leste': [
+    'Zona Leste', 'Jardim Shangri-Lá', 'Shangri-La', 'Shangri La',
+    'Jardim Shangri La', 'Universitário', 'Universitario', 'Hipica',
+    'Hípica', 'Vivi Xavier', 'Conjunto Vivi Xavier', 'Jd. Pinheiros',
+    'Jardim Pinheiros', 'Arapongas', 'Centenário', 'Centenario',
+    'São Lourenço', 'Sao Lourenco', 'Warta', 'Espírito Santo', 'Espirito Santo'
+  ],
+  'Zona Oeste': [
+    'Zona Oeste', 'Jardim Los Angeles', 'Los Angeles', 'Ouro Verde',
+    'Jardim Ouro Verde', 'Piza', 'Jardim Piza', 'União da Vitória',
+    'Armando Storani', 'São Jorge', 'Sao Jorge', 'Monte Belo',
+    'Jardim Monte Belo', 'Maracanã', 'Maracana', 'Jardim Esperança',
+    'Jardim Esperanca', 'Santa Fé', 'Santa Fe'
+  ]
+}
+
+// Monta filtro OR de bairros para uma zona
+function buildRegiaoFilter(regiao) {
+  // Tenta match exato na zona primeiro
+  const bairros = Object.entries(BAIRROS_POR_ZONA).find(
+    ([zona]) => zona.toLowerCase() === regiao.toLowerCase() ||
+                zona.toLowerCase().includes(regiao.toLowerCase()) ||
+                regiao.toLowerCase().includes(zona.toLowerCase().replace('zona ', ''))
+  )
+  if (bairros) {
+    return bairros[1].map(b => `neighborhood_name.ilike.%${b}%`).join(',')
+  }
+  // Fallback: busca pelo nome direto
+  return `neighborhood_name.ilike.%${regiao}%`
+}
+
 // Busca imóveis disponíveis que combinam com o perfil do cliente
 // (tabela "imoveis" — espelha os imóveis cadastrados no site joao-terra-site,
 // sincronizados via scripts/add-property.mjs. Ver schema em
@@ -116,12 +172,22 @@ async function searchImoveis({ tipo, quartos, regiao, orcamento, finalidade } = 
     .select('*')
     .eq('status', 'disponivel')
     .eq('purpose', purpose)
-    .limit(3)
+    .limit(5)
 
   if (tipo) query = query.eq('type', tipo)
   if (quartos) query = query.gte('bedrooms', Number(quartos))
-  if (regiao) query = query.ilike('neighborhood_name', `%${regiao}%`)
-  if (orcamento) query = query.lte('price', Number(orcamento))
+
+  // Região: busca por todos os bairros da zona (não só nome exato)
+  if (regiao) {
+    const regiaoFilter = buildRegiaoFilter(regiao)
+    query = query.or(regiaoFilter)
+  }
+
+  // Orçamento: aceita até 30% acima do valor informado pelo cliente
+  if (orcamento) {
+    const maxPrice = Math.round(Number(orcamento) * 1.3)
+    query = query.lte('price', maxPrice)
+  }
 
   const { data, error } = await query
 

@@ -102,20 +102,33 @@ app.post('/webhook', async (req, res) => {
     }
 
     // Verifica se é comando /responder enviado pelo próprio João
+    // Normaliza os dois lados: remove sufixos, não-dígitos e o nono dígito
+    // (WhatsApp às vezes reporta o número do João com ou sem o 9)
     const joaoPhone = process.env.JOAO_PHONE_NUMBER
-    if (joaoPhone && phone === joaoPhone.replace('@s.whatsapp.net', '').replace(/\D/g, '')) {
+    const normalizeForCompare = (n) => n.replace('@s.whatsapp.net', '').replace(/\D/g, '').replace(/^55(\d{2})9(\d{8})$/, '55$1$2')
+    if (joaoPhone && normalizeForCompare(phone) === normalizeForCompare(joaoPhone)) {
       const cmd = parseResponderCommand(text, phone)
       if (cmd) {
+        console.log(`[Responder] Comando detectado — target: ${cmd.targetPhone} | msg: "${cmd.message}"`)
         try {
-          await sendWhatsAppMessage(cmd.targetPhone, cmd.message)
-          await addMessage(cmd.targetPhone, 'assistant', cmd.message)
-          await updateSession(cmd.targetPhone, { state: 'TRIAGEM_LOCACAO' })
-          console.log(`[Responder] João respondeu para ${cmd.targetPhone}: "${cmd.message}"`)
+          // Normaliza o número do cliente para bater com o que está na sessão
+          const targetNorm = normalizePhone(cmd.targetPhone)
+          console.log(`[Responder] Número normalizado: ${cmd.targetPhone} → ${targetNorm}`)
+          const sent = await sendWhatsAppMessage(targetNorm, cmd.message)
+          console.log(`[Responder] Envio: ${sent ? 'OK' : 'FALHOU'}`)
+          await addMessage(targetNorm, 'assistant', cmd.message)
+          // Retoma sessão no estado de triagem adequado (não hardcoded)
+          const clientSession = await getSession(targetNorm)
+          const resumeState = clientSession?.profile?.finalidade === 'venda'
+            ? 'TRIAGEM_COMPRA' : 'TRIAGEM_LOCACAO'
+          await updateSession(targetNorm, { state: resumeState })
+          console.log(`[Responder] Sessão retomada em ${resumeState} para ${targetNorm}`)
         } catch (err) {
           console.error('[Responder] Erro ao processar comando:', err.message)
         }
         return
       }
+      console.log(`[Responder] Mensagem do João não é comando /responder — processando normalmente`)
     }
 
     // Filtra: só inicia atendimento pra primeiro contato absoluto
