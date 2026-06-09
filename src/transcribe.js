@@ -1,6 +1,6 @@
 require('dotenv').config()
 const axios = require('axios')
-const { OpenAI } = require('openai')
+const { OpenAI, toFile } = require('openai')
 
 // Groq é compatível com a interface OpenAI — só muda baseURL e modelo
 const groq = new OpenAI({
@@ -28,9 +28,9 @@ async function transcribeAudio(mediaKey) {
       return null
     }
 
-    // Converte base64 para buffer e cria File
+    // Converte base64 para buffer compatível com Node 18
     const buffer = Buffer.from(base64, 'base64')
-    const audioFile = new File([buffer], 'audio.ogg', { type: 'audio/ogg' })
+    const audioFile = await toFile(buffer, 'audio.ogg', { type: 'audio/ogg' })
 
     // Transcreve com Groq Whisper — gratuito e rápido
     const transcription = await groq.audio.transcriptions.create({
