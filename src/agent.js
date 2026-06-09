@@ -3,6 +3,7 @@ const Anthropic = require('@anthropic-ai/sdk')
 const { buildContextPrompt } = require('../prompts/system-prompt')
 const { getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
+const { addLead, updateLead, stateToStatus } = require('./sheets')
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -208,10 +209,16 @@ async function processMessage(phone, userMessage) {
   console.log(`[Agente] Processando mensagem de ${phone}: "${userMessage}"`)
 
   // Busca ou cria sessão
+  const isNewSession = !(await getSession(phone))
   const session = await getOrCreateSession(phone)
   if (!session) {
     console.error('[Agente] Não foi possível criar/buscar sessão')
     return null
+  }
+
+  // Novo lead — cria linha na planilha
+  if (isNewSession) {
+    await addLead({ phone, nome: '', origem: 'WhatsApp' })
   }
 
   // Extrai dados de perfil da mensagem
@@ -311,6 +318,18 @@ async function processMessage(phone, userMessage) {
     await notifyJoao(alertMsg)
     console.log(`[Agente] João notificado: ${alertMsg}`)
   }
+
+  // Atualiza planilha com dados do perfil e status atual
+  await updateLead(phone, {
+    nome: updatedProfile.nome,
+    regiao: updatedProfile.regiao,
+    tipo: updatedProfile.tipo,
+    quartos: updatedProfile.quartos,
+    orcamento: updatedProfile.orcamento ? `R$ ${updatedProfile.orcamento}` : undefined,
+    cpf: updatedProfile.cpf ? (updatedProfile.cpfStatus || 'Aguardando') : undefined,
+    status: stateToStatus(finalState),
+    tipoContato: updatedProfile.finalidade === 'captacao' ? 'Proprietário' : 'Locatário'
+  })
 
   console.log(`[Agente] Estado: ${session.state} → ${finalState} | Resposta enviada`)
   return agentResponse
