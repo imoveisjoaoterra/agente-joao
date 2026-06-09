@@ -1,24 +1,25 @@
 require('dotenv').config()
 const axios = require('axios')
-const FormData = require('form-data')
 const { OpenAI } = require('openai')
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+// Groq é compatível com a interface OpenAI — só muda baseURL e modelo
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: 'https://api.groq.com/openai/v1'
+})
 
 const EVOLUTION_URL = process.env.EVOLUTION_API_URL
 const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY
 const INSTANCE = process.env.EVOLUTION_INSTANCE_NAME
 
-// Baixa o áudio da Evolution API e transcreve via Whisper
+// Baixa o áudio da Evolution API e transcreve via Groq Whisper (gratuito)
 async function transcribeAudio(mediaKey) {
   try {
-    // Baixa o arquivo de mídia da Evolution API
-    const mediaResponse = await axios.get(
+    // Baixa o arquivo de mídia da Evolution API em base64
+    const mediaResponse = await axios.post(
       `${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${INSTANCE}`,
-      {
-        headers: { apikey: EVOLUTION_KEY, 'Content-Type': 'application/json' },
-        data: { message: { key: mediaKey } }
-      }
+      { message: { key: mediaKey } },
+      { headers: { apikey: EVOLUTION_KEY, 'Content-Type': 'application/json' } }
     )
 
     const base64 = mediaResponse.data?.base64
@@ -27,18 +28,14 @@ async function transcribeAudio(mediaKey) {
       return null
     }
 
-    // Converte base64 para buffer
+    // Converte base64 para buffer e cria File
     const buffer = Buffer.from(base64, 'base64')
+    const audioFile = new File([buffer], 'audio.ogg', { type: 'audio/ogg' })
 
-    // Monta FormData para Whisper
-    const form = new FormData()
-    form.append('file', buffer, { filename: 'audio.ogg', contentType: 'audio/ogg' })
-    form.append('model', 'whisper-1')
-    form.append('language', 'pt')
-
-    const transcription = await openai.audio.transcriptions.create({
-      file: new File([buffer], 'audio.ogg', { type: 'audio/ogg' }),
-      model: 'whisper-1',
+    // Transcreve com Groq Whisper — gratuito e rápido
+    const transcription = await groq.audio.transcriptions.create({
+      file: audioFile,
+      model: 'whisper-large-v3-turbo',
       language: 'pt'
     })
 
@@ -47,6 +44,9 @@ async function transcribeAudio(mediaKey) {
 
   } catch (err) {
     console.error('[Transcribe] Erro ao transcrever áudio:', err.message)
+    if (err.response) {
+      console.error('[Transcribe] Detalhes:', JSON.stringify(err.response.data))
+    }
     return null
   }
 }
