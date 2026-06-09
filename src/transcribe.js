@@ -2,6 +2,12 @@ require('dotenv').config()
 const axios = require('axios')
 const { OpenAI, toFile } = require('openai')
 
+// Polyfill para Node 18 que não tem File global
+if (typeof globalThis.File === 'undefined') {
+  const { File } = require('node:buffer')
+  globalThis.File = File
+}
+
 // Groq é compatível com a interface OpenAI — só muda baseURL e modelo
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
