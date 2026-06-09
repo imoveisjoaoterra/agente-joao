@@ -8,19 +8,28 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // Estados do fluxo
 const STATES = {
+  // Abertura
   INICIAL: 'INICIAL',
-  TRIAGEM: 'TRIAGEM',
-  FORA_PERFIL: 'FORA_PERFIL',
-  APRESENTACAO: 'APRESENTACAO',
-  // Estado próprio para quem quer COMPRAR — não passa por fiança/CPF
-  // (esse fluxo é exclusivo de aluguel). Ver achado 1 do QA em
-  // 06_OUTPUTS/2026-06-07_agente-imoveis-whatsapp/qa-revisao-fluxo-conversa.md
-  INTERESSE_VENDA: 'INTERESSE_VENDA',
+  AGUARDANDO_NOME: 'AGUARDANDO_NOME',
+
+  // Fluxos omnichannel
+  INQUILINO: 'INQUILINO',
+  PROPRIETARIO: 'PROPRIETARIO',
+  CAPTACAO: 'CAPTACAO',
+
+  // Fluxo locação
+  TRIAGEM_LOCACAO: 'TRIAGEM_LOCACAO',
+  APRESENTACAO_LOCACAO: 'APRESENTACAO_LOCACAO',
   GARANTIA: 'GARANTIA',
   AGUARDANDO_CPF: 'AGUARDANDO_CPF',
   NOTIFICA_JOAO: 'NOTIFICA_JOAO',
   CPF_APROVADO: 'CPF_APROVADO',
   CPF_REPROVADO: 'CPF_REPROVADO',
+
+  // Fluxo compra
+  TRIAGEM_COMPRA: 'TRIAGEM_COMPRA',
+  INTERESSE_COMPRA: 'INTERESSE_COMPRA',
+
   VISITA_AGENDADA: 'VISITA_AGENDADA',
   ENCERRADO: 'ENCERRADO'
 }
@@ -72,45 +81,89 @@ function wantsToSeeProperties(text) {
   return triggers.some(t => lower.includes(t))
 }
 
+// Detecta fluxo pelo conteúdo da mensagem
+function detectFlow(text) {
+  const lower = text.toLowerCase()
+
+  // Inquilino — menção a boleto, manutenção, conserto, rescisão, desocupação
+  if (/boleto|2[aª] via|segunda via|vencimento|manutenção|manutencao|conserto|vazamento|infiltração|infiltracao|rescisão|rescisao|desocup|sair do imóvel|entregar o imóvel/.test(lower)) {
+    return STATES.INQUILINO
+  }
+
+  // Proprietário — repasse, administração do imóvel que possui
+  if (/repasse|quando (vou |eu )?(receber|cai|cair)|dia do pagamento|meu imóvel|minha casa|meu apartamento/.test(lower)) {
+    return STATES.PROPRIETARIO
+  }
+
+  // Captação — quer deixar imóvel pra alugar
+  if (/(quero |tenho um |tenho uma ).*(alugar|locar|colocar pra alugar|disponível pra|disponivel pra)|captar|administr.*imóvel|imóvel.*administr/.test(lower)) {
+    return STATES.CAPTACAO
+  }
+
+  // Compra
+  if (/comprar|compra|à venda|a venda|financiar|financiamento|adquirir/.test(lower)) {
+    return STATES.TRIAGEM_COMPRA
+  }
+
+  // Locação
+  if (/alugar|aluguel|locar|locação|locacao|quero (um |uma )?(casa|apê|apto|apartamento|kitnet)/.test(lower)) {
+    return STATES.TRIAGEM_LOCACAO
+  }
+
+  return null
+}
+
 // Detecta próximo estado com base na mensagem e estado atual
 function detectNextState(text, currentState, profile) {
   const lower = text.toLowerCase()
 
-  if (currentState === STATES.INICIAL || currentState === STATES.TRIAGEM) {
-    // Verifica se temos todas as informações de triagem
-    const hasRegion = profile.regiao
-    const hasTipo = profile.tipo
-    const hasQuartos = profile.quartos
-    const hasOrcamento = profile.orcamento
-
-    if (hasRegion && hasTipo && hasQuartos && hasOrcamento) {
-      return STATES.APRESENTACAO
-    }
-    return STATES.TRIAGEM
+  // Abertura — aguardando nome
+  if (currentState === STATES.INICIAL) {
+    return STATES.AGUARDANDO_NOME
   }
 
-  if (currentState === STATES.APRESENTACAO) {
-    const showsInterest = lower.includes('gostei') || lower.includes('interesse') ||
-        lower.includes('quero') || lower.includes('esse') ||
-        lower.includes('visitar') || lower.includes('ver')
+  // Após nome, tenta detectar fluxo já na mesma mensagem
+  if (currentState === STATES.AGUARDANDO_NOME) {
+    const flow = detectFlow(text)
+    if (flow) return flow
+    return STATES.AGUARDANDO_NOME
+  }
 
+  // Tenta detectar fluxo em qualquer estado neutro
+  if (currentState === STATES.AGUARDANDO_NOME) {
+    const flow = detectFlow(text)
+    return flow || STATES.AGUARDANDO_NOME
+  }
+
+  // Triagem locação → apresentação quando tiver perfil completo
+  if (currentState === STATES.TRIAGEM_LOCACAO) {
+    const { regiao, tipo, quartos, orcamento } = profile
+    if (regiao && tipo && quartos && orcamento) return STATES.APRESENTACAO_LOCACAO
+    return STATES.TRIAGEM_LOCACAO
+  }
+
+  // Apresentação locação → garantia ou compra
+  if (currentState === STATES.APRESENTACAO_LOCACAO) {
+    const showsInterest = /gostei|interesse|quero|esse|visitar|ver/.test(lower)
     if (showsInterest) {
-      // Ramificação por finalidade: fiança/CPF é exclusivo de ALUGUEL.
-      // Quem quer COMPRAR vai para um estado próprio, sem esse fluxo.
-      return profile.finalidade === 'venda' ? STATES.INTERESSE_VENDA : STATES.GARANTIA
+      return profile.finalidade === 'venda' ? STATES.INTERESSE_COMPRA : STATES.GARANTIA
     }
   }
 
+  // Garantia → aguardando CPF
   if (currentState === STATES.GARANTIA) {
-    const cpf = extractCPF(text)
-    if (cpf) return STATES.AGUARDANDO_CPF
+    if (extractCPF(text)) return STATES.AGUARDANDO_CPF
     return STATES.GARANTIA
   }
 
+  // CPF recebido → notifica João
   if (currentState === STATES.AGUARDANDO_CPF) {
-    const cpf = extractCPF(text)
-    if (cpf) return STATES.NOTIFICA_JOAO
+    if (extractCPF(text)) return STATES.NOTIFICA_JOAO
   }
+
+  // Tenta detectar mudança de fluxo em qualquer ponto
+  const flow = detectFlow(text)
+  if (flow && flow !== currentState) return flow
 
   return currentState
 }
