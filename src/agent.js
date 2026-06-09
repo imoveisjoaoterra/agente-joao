@@ -4,6 +4,7 @@ const { buildContextPrompt } = require('../prompts/system-prompt')
 const { getSession, getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
 const { addLead, updateLead, stateToStatus } = require('./sheets')
+const { applyLabel } = require('./labels')
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -318,6 +319,9 @@ async function processMessage(phone, userMessage) {
     await notifyJoao(alertMsg)
     console.log(`[Agente] João notificado: ${alertMsg}`)
   }
+
+  // Aplica etiqueta no WhatsApp Business conforme estado
+  await applyLabel(phone, finalState)
 
   // Atualiza planilha com dados do perfil e status atual
   await updateLead(phone, {
