@@ -104,58 +104,99 @@ async function getOrCreateSession(phone) {
   return session
 }
 
-// Mapa de regiões de Londrina → bairros pertencentes à zona
-// Usado para ampliar a busca além do nome exato da região
+// Mapa oficial de bairros de Londrina por zona (fornecido pelo operador)
 const BAIRROS_POR_ZONA = {
-  'Centro': [
-    'Centro', 'Centro Cívico', 'Vila Nova', 'Jardim Agari', 'Jardim Higienópolis',
-    'Jardim Higienopolis', 'Bela Suíça', 'Bela Suica', 'Calçada', 'Calcada',
-    'Vilas do Arvoredo', 'Vila Casoni', 'Palhano', 'Gleba Palhano'
-  ],
   'Zona Norte': [
-    'Zona Norte', 'Cafezal', 'Jardim Cafezal', 'Heimtal', 'Cinco Conjuntos',
-    'Lindóia', 'Lindoia', 'Conjunto Vivi Xavier', 'Jardim do Sol',
-    'Jardim Piza', 'Parigot de Souza', 'Ana Botelho', 'Ernani Moura Lima',
-    'Colinas', 'Jardim Colinas', 'Novo Bandeirantes', 'Bandeirantes',
-    'Interlagos', 'Jardim Interlagos', 'Igapó', 'Igapo', 'União da Vitória',
-    'Uniao da Vitoria', 'Antonio Zanello', 'São Luiz', 'Sao Luiz',
-    'Pacaembu', 'Jardim Pacaembu'
+    'Maria Cecília', 'Vista Bela', 'Flores do Campo', 'Semíramis', 'Violin',
+    'Aquiles Stenghel', 'Luiz de Sá', 'Parigot de Souza', 'Vivi Xavier',
+    'João Paz', 'Milton Gavetti', 'Jardim dos Alpes', 'Jardim Pacaembu',
+    'Jardim Coliseu', 'Heimtal', 'Ouro Verde', 'Cinco Conjuntos',
+    'Conjunto Violim', 'Conjunto Cafezal Norte', 'Jardim Primavera',
+    'Jardim Planalto', 'Jardim São Jorge', 'Parque Industrial Cacique',
+    'Perobinha', 'São Tomaz', 'Residencial Horizonte', 'Residencial do Café',
+    'Conjunto José Giordano'
   ],
   'Zona Sul': [
-    'Zona Sul', 'Gleba Palhano', 'Palhano', 'Alto da Boa Vista',
-    'Royal Park', 'Catuaí', 'Catuai', 'Jardim do Pão', 'Jardim do Pao',
-    'Antares', 'Conjunto Habitacional', 'Patrimônio', 'Patrimonio',
-    'Vale do Sol', 'Jardim Petrópolis', 'Jardim Petropolis',
-    'Tucanos', 'Jardim Tucanos', 'Caminhos do Sol', 'Portal do Sol',
-    'Morumbi', 'Jardim Morumbi', 'Lerroville', 'Espírito Santo', 'Espirito Santo'
+    'Gleba Palhano', 'Aurora', 'Terra Bonita', 'Bela Suíça', 'Jardim Tucanos',
+    'Jardim Cafezal', 'Jardim Piza', 'Jardim Itatiaia', 'Colina Verde',
+    'Guanabara', 'Vivendas do Arvoredo', 'Acapulco', 'Esperança',
+    'Nova Esperança', 'Saltinho', 'União da Vitória', 'Parque das Indústrias',
+    'Jardim Marissol', 'Jardim San Fernando', 'Jardim Montecatini',
+    'Jardim Burle Marx', 'Royal Park', 'Alphaville', 'Sun Lake', 'Parque Tauá Sul'
   ],
   'Zona Leste': [
-    'Zona Leste', 'Jardim Shangri-Lá', 'Shangri-La', 'Shangri La',
-    'Jardim Shangri La', 'Universitário', 'Universitario', 'Hipica',
-    'Hípica', 'Vivi Xavier', 'Conjunto Vivi Xavier', 'Jd. Pinheiros',
-    'Jardim Pinheiros', 'Arapongas', 'Centenário', 'Centenario',
-    'São Lourenço', 'Sao Lourenco', 'Warta', 'Espírito Santo', 'Espirito Santo'
+    'Jardim Morumbi', 'Jardim Interlagos', 'Jardim Antares', 'Jardim Ideal',
+    'Jardim Califórnia', 'Jardim Brasília', 'Jardim Santa Fé', 'Jardim Marabá',
+    'Pindorama', 'Vila Yara', 'Vila Santa Terezinha', 'Conjunto Ernani Moura Lima',
+    'Aeroporto', 'Gleba Lindóia', 'Vila Fraternidade', 'Jardim São Vicente',
+    'Jardim Santo André', 'Jardim do Sol', 'Parque das Indústrias Leves',
+    'Residencial Abussafe', 'Jardim Oriental', 'Jardim Santa Rita'
   ],
   'Zona Oeste': [
-    'Zona Oeste', 'Jardim Los Angeles', 'Los Angeles', 'Ouro Verde',
-    'Jardim Ouro Verde', 'Piza', 'Jardim Piza', 'União da Vitória',
-    'Armando Storani', 'São Jorge', 'Sao Jorge', 'Monte Belo',
-    'Jardim Monte Belo', 'Maracanã', 'Maracana', 'Jardim Esperança',
-    'Jardim Esperanca', 'Santa Fé', 'Santa Fe'
+    'Jardim Bandeirantes', 'Jardim Sabará', 'Jardim Jamaica', 'Jardim Leonor',
+    'Jardim Olímpico', 'Jardim Presidente', 'Jardim Champagnat', 'Shangri-lá',
+    'Parque Universidade', 'Jardim Columbia', 'Jardim Alvorada', 'Jardim Bancários',
+    'Jardim Hedy', 'Jockey Club', 'Jardim Versalhes', 'Jardim Barcelona',
+    'Jardim Monte Belo', 'Jardim Tocantins', 'Jardim Santiago', 'Cilo II Oeste',
+    'Cilo III', 'Chácaras Esperança'
+  ],
+  'Centro': [
+    'Centro', 'Centro Histórico', 'Vila Casoni', 'Vila Brasil', 'Vila Nova',
+    'Vila Recreio', 'Vila Ipiranga', 'Jardim Higienópolis', 'Jardim Petrópolis',
+    'Jardim Quebec', 'Jardim Shangri-lá A', 'Jardim América', 'Jardim Claudia',
+    'Jardim Londrilar', 'Jardim Imperial', 'Jardim Agari', 'Campos Elíseos'
   ]
+}
+
+// Bairros de alto padrão — usado internamente para direcionar buscas
+// quando orçamento é elevado. NUNCA mencionar "alto padrão" ou "região nobre" ao cliente.
+const BAIRROS_ALTO_PADRAO = [
+  'Gleba Palhano', 'Bela Suíça', 'Alphaville', 'Royal Golf Residence',
+  'Sun Lake', 'Aurora', 'Terra Bonita', 'Jardim Tucanos', 'Colina Verde',
+  'Jardim Mediterrâneo', 'Jardim Presidente', 'Champagnat',
+  'Jardim Higienópolis', 'Jardim Quebec', 'Guanabara'
+]
+
+// Detecta a zona de um bairro específico
+function detectarZona(bairro) {
+  const b = bairro.toLowerCase()
+  for (const [zona, bairros] of Object.entries(BAIRROS_POR_ZONA)) {
+    if (bairros.some(item => item.toLowerCase() === b || b.includes(item.toLowerCase()) || item.toLowerCase().includes(b))) {
+      return zona
+    }
+  }
+  return null
 }
 
 // Monta filtro OR de bairros para uma zona
 function buildRegiaoFilter(regiao) {
-  // Tenta match exato na zona primeiro
-  const bairros = Object.entries(BAIRROS_POR_ZONA).find(
-    ([zona]) => zona.toLowerCase() === regiao.toLowerCase() ||
-                zona.toLowerCase().includes(regiao.toLowerCase()) ||
-                regiao.toLowerCase().includes(zona.toLowerCase().replace('zona ', ''))
+  // Normaliza abreviações comuns
+  const norm = regiao.toLowerCase()
+    .replace(/^zn$/, 'zona norte')
+    .replace(/^zs$/, 'zona sul')
+    .replace(/^zl$/, 'zona leste')
+    .replace(/^zo$/, 'zona oeste')
+    .replace(/^norte$/, 'zona norte')
+    .replace(/^sul$/, 'zona sul')
+    .replace(/^leste$/, 'zona leste')
+    .replace(/^oeste$/, 'zona oeste')
+
+  // Tenta match exato na zona
+  const match = Object.entries(BAIRROS_POR_ZONA).find(
+    ([zona]) => zona.toLowerCase() === norm ||
+                zona.toLowerCase().includes(norm) ||
+                norm.includes(zona.toLowerCase().replace('zona ', ''))
   )
-  if (bairros) {
-    return bairros[1].map(b => `neighborhood_name.ilike.%${b}%`).join(',')
+  if (match) {
+    return match[1].map(b => `neighborhood_name.ilike.%${b}%`).join(',')
   }
+
+  // Verifica se é um bairro específico — detecta a zona e busca por ela
+  const zona = detectarZona(regiao)
+  if (zona) {
+    return BAIRROS_POR_ZONA[zona].map(b => `neighborhood_name.ilike.%${b}%`).join(',')
+  }
+
   // Fallback: busca pelo nome direto
   return `neighborhood_name.ilike.%${regiao}%`
 }
@@ -177,15 +218,25 @@ async function searchImoveis({ tipo, quartos, regiao, orcamento, finalidade } = 
   if (tipo) query = query.eq('type', tipo)
   if (quartos) query = query.gte('bedrooms', Number(quartos))
 
+  const orcamentoNum = orcamento ? Number(orcamento) : null
+
   // Região: busca por todos os bairros da zona (não só nome exato)
   if (regiao) {
     const regiaoFilter = buildRegiaoFilter(regiao)
     query = query.or(regiaoFilter)
+  } else if (orcamentoNum) {
+    // Sem região definida + orçamento alto → prioriza bairros de alto padrão
+    const isAltoOrcamento = (purpose === 'venda' && orcamentoNum >= 800000) ||
+                            (purpose === 'aluguel' && orcamentoNum >= 3000)
+    if (isAltoOrcamento) {
+      const altoPadraoFilter = BAIRROS_ALTO_PADRAO.map(b => `neighborhood_name.ilike.%${b}%`).join(',')
+      query = query.or(altoPadraoFilter)
+    }
   }
 
   // Orçamento: aceita até 30% acima do valor informado pelo cliente
-  if (orcamento) {
-    const maxPrice = Math.round(Number(orcamento) * 1.3)
+  if (orcamentoNum) {
+    const maxPrice = Math.round(orcamentoNum * 1.3)
     query = query.lte('price', maxPrice)
   }
 
