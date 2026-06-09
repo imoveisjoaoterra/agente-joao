@@ -118,11 +118,15 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // Filtra: só atende primeiro contato absoluto (sem sessão prévia no Supabase)
+    // Filtra: só inicia atendimento pra primeiro contato absoluto
+    // Mas continua respondendo quem já tem sessão ATIVA (conversa em andamento)
     const existingSession = await getSession(phone)
     if (existingSession) {
-      console.log(`[Webhook] Número ${phone} já tem sessão — ignorado (não é primeiro contato)`)
-      return
+      if (existingSession.state === 'ENCERRADO') {
+        console.log(`[Webhook] Número ${phone} com sessão encerrada — ignorado`)
+        return
+      }
+      // Sessão ativa — deixa passar pra continuar a conversa
     }
 
     console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
