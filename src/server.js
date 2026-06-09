@@ -35,9 +35,6 @@ app.post('/webhook', async (req, res) => {
     const message = payload.data
     if (!message) return
 
-    // Ignora mensagens enviadas pelo próprio número (evita loop)
-    if (message.key?.fromMe === true) return
-
     // Ignora mensagens de grupos (@g.us)
     if (message.key?.remoteJid?.endsWith('@g.us')) return
 
@@ -48,7 +45,7 @@ app.post('/webhook', async (req, res) => {
       message.message?.buttonsResponseMessage?.selectedDisplayText
 
     // Trata mensagem de áudio — transcreve via Whisper
-    if (!text && message.message?.audioMessage) {
+    if (!text && !message.key?.fromMe && message.message?.audioMessage) {
       console.log('[Webhook] Áudio recebido — transcrevendo...')
       const transcribed = await transcribeAudio(message.key)
       if (transcribed) {
@@ -61,15 +58,6 @@ app.post('/webhook', async (req, res) => {
     }
 
     if (!text || text.trim() === '') return
-
-    // Log completo para debug de @lid
-    if (message.key?.remoteJid?.includes('@lid')) {
-      const keys = Object.keys(message)
-      console.log('[Debug @lid] Campos disponíveis:', keys.join(', '))
-      console.log('[Debug @lid] pushName:', message.pushName)
-      console.log('[Debug @lid] key:', JSON.stringify(message.key))
-      console.log('[Debug @lid] messageStubParameters:', message.messageStubParameters)
-    }
 
     // Extrai número do remetente
     const remoteJid = message.key?.remoteJid || ''
@@ -87,23 +75,20 @@ app.post('/webhook', async (req, res) => {
       return
     }
 
-    // @lid não é um JID válido para ENVIO (a Evolution API recebe mensagens
-    // dele, mas reporta "exists: false" ao tentar mandar de volta — erro 400
-    // visto em produção em 2026-06-07). Tenta resolver para o número de
-    // telefone real via lista de contatos antes de seguir.
+    // @lid não é um JID válido para ENVIO
     if (remoteJid.includes('@lid')) {
       const resolved = await resolveLid(remoteJid, pushName)
       if (resolved) {
         console.log(`[Webhook] @lid resolvido para número real: ${resolved} (${pushName})`)
         phone = resolved
       } else {
-        console.log(`[Webhook] @lid não resolvido — seguindo com JID direto (envio pode falhar): ${phone} (${pushName})`)
+        console.log(`[Webhook] @lid não resolvido — seguindo com JID direto: ${phone} (${pushName})`)
       }
     }
 
     // Verifica se é comando /responder enviado pelo próprio João
-    // Normaliza os dois lados: remove sufixos, não-dígitos e o nono dígito
-    // (WhatsApp às vezes reporta o número do João com ou sem o 9)
+    // IMPORTANTE: este check vem ANTES do filtro fromMe para que o João
+    // consiga usar /responder a partir do seu próprio número
     const joaoPhone = process.env.JOAO_PHONE_NUMBER
     const normalizeForCompare = (n) => n.replace('@s.whatsapp.net', '').replace(/\D/g, '').replace(/^55(\d{2})9(\d{8})$/, '55$1$2')
     if (joaoPhone && normalizeForCompare(phone) === normalizeForCompare(joaoPhone)) {
@@ -128,8 +113,12 @@ app.post('/webhook', async (req, res) => {
         }
         return
       }
-      console.log(`[Responder] Mensagem do João não é comando /responder — processando normalmente`)
+      console.log(`[Responder] Mensagem do João não é /responder — ignorando`)
+      return // Mensagens do próprio João que não são /responder não são processadas
     }
+
+    // Ignora mensagens enviadas pelo próprio número (evita loop)
+    if (message.key?.fromMe === true) return
 
     // Filtra: só inicia atendimento pra primeiro contato absoluto
     // Mas continua respondendo quem já tem sessão ATIVA (conversa em andamento)
