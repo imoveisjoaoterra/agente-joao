@@ -30,6 +30,7 @@ const STATES = {
   TRIAGEM_COMPRA: 'TRIAGEM_COMPRA',
   INTERESSE_COMPRA: 'INTERESSE_COMPRA',
 
+  AGUARDANDO_JOAO: 'AGUARDANDO_JOAO',
   VISITA_AGENDADA: 'VISITA_AGENDADA',
   ENCERRADO: 'ENCERRADO'
 }
@@ -249,24 +250,40 @@ async function processMessage(phone, userMessage) {
     imoveis
   })
 
+  // Se sessão está aguardando João, ignora mensagem do cliente
+  if (session.state === STATES.AGUARDANDO_JOAO) {
+    console.log(`[Agente] Sessão ${phone} aguardando João — mensagem ignorada`)
+    return null
+  }
+
   // Chama o Claude
   let agentResponse = ''
+  let needsJoao = false
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 400,
-      system: contextualPrompt,
+      system: contextualPrompt + `\n\nSe não tiver informação suficiente para responder com precisão, responda EXATAMENTE com o texto: [AGUARDANDO_JOAO] seguido da mensagem pro cliente (ex: "[AGUARDANDO_JOAO] Deixa eu verificar aqui pra você. Só um momento! 😊"). Não use essa marcação em situações normais — só quando genuinamente precisar de uma informação que não tem.`,
       messages: [{ role: 'user', content: userMessage }]
     })
-    agentResponse = response.content[0].text
+    const raw = response.content[0].text
+    if (raw.startsWith('[AGUARDANDO_JOAO]')) {
+      needsJoao = true
+      agentResponse = raw.replace('[AGUARDANDO_JOAO]', '').trim()
+    } else {
+      agentResponse = raw
+    }
   } catch (err) {
     console.error('[Agente] Erro na API Claude:', err.message)
     agentResponse = 'Oi! Tive um problema aqui. Pode repetir sua mensagem?'
   }
 
+  // Define estado final
+  const finalState = needsJoao ? STATES.AGUARDANDO_JOAO : nextState
+
   // Atualiza sessão
   await updateSession(phone, {
-    state: nextState,
+    state: finalState,
     profile: updatedProfile
   })
 
@@ -276,8 +293,16 @@ async function processMessage(phone, userMessage) {
   // Envia resposta ao cliente
   await sendWhatsAppMessage(phone, agentResponse)
 
-  // Notifica João se necessário
-  if (escalate || nextState === STATES.NOTIFICA_JOAO) {
+  // Notifica João se entrou em modo de espera
+  if (needsJoao) {
+    const nome = updatedProfile.nome || 'sem nome'
+    const alertMsg = `⏸ #AGUARDANDO — ${nome} (${phone})\n\nPergunta: "${userMessage}"\n\nPerfil: ${JSON.stringify(updatedProfile, null, 2)}\n\nResponda com:\n/responder ${phone} [sua resposta]`
+    await notifyJoao(alertMsg)
+    console.log(`[Agente] Sessão pausada — João notificado para ${phone}`)
+  }
+
+  // Notifica João em outros casos críticos
+  if (!needsJoao && (escalate || nextState === STATES.NOTIFICA_JOAO)) {
     const cpf = updatedProfile.cpf || extractCPF(userMessage)
     const alertMsg = cpf
       ? `#VISITA — ${phone} — CPF: ${cpf} — pré-aprovação pendente — perfil: ${JSON.stringify(updatedProfile)}`
@@ -287,7 +312,7 @@ async function processMessage(phone, userMessage) {
     console.log(`[Agente] João notificado: ${alertMsg}`)
   }
 
-  console.log(`[Agente] Estado: ${session.state} → ${nextState} | Resposta enviada`)
+  console.log(`[Agente] Estado: ${session.state} → ${finalState} | Resposta enviada`)
   return agentResponse
 }
 
