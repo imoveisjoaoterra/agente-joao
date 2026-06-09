@@ -123,22 +123,20 @@ function detectFlow(text) {
 function detectNextState(text, currentState, profile) {
   const lower = text.toLowerCase()
 
-  // Abertura — aguardando nome
+  // Abertura — se já tem nome (contato salvo), pula direto para detecção de fluxo
   if (currentState === STATES.INICIAL) {
+    if (profile.nome) {
+      const flow = detectFlow(text)
+      return flow || STATES.AGUARDANDO_NOME // AGUARDANDO_NOME aqui = aguardando intenção, não nome
+    }
     return STATES.AGUARDANDO_NOME
   }
 
-  // Após nome, tenta detectar fluxo já na mesma mensagem
+  // Após saudação (sem nome ainda), tenta detectar fluxo na mesma mensagem
   if (currentState === STATES.AGUARDANDO_NOME) {
     const flow = detectFlow(text)
     if (flow) return flow
     return STATES.AGUARDANDO_NOME
-  }
-
-  // Tenta detectar fluxo em qualquer estado neutro
-  if (currentState === STATES.AGUARDANDO_NOME) {
-    const flow = detectFlow(text)
-    return flow || STATES.AGUARDANDO_NOME
   }
 
   // Triagem locação → apresentação quando tiver perfil completo
@@ -319,12 +317,13 @@ async function processMessage(phone, userMessage, pushName) {
   // Extrai dados de perfil da mensagem (passa estado atual para captura de nome)
   let updatedProfile = extractProfileData(userMessage, session.profile || {}, session.state)
 
-  // Captura nome do pushName do WhatsApp se ainda não tiver nome no perfil
+  // Captura primeiro nome do pushName do WhatsApp se ainda não tiver nome no perfil
+  // pushName = nome salvo nos contatos de João (contato salvo) ou nome do WhatsApp do cliente
   if (!updatedProfile.nome && pushName) {
-    updatedProfile.nome = pushName
+    updatedProfile.nome = pushName.trim().split(' ')[0] // só o primeiro nome
   }
 
-  // Detecta próximo estado
+  // Detecta próximo estado — se já tem nome (pushName), pula AGUARDANDO_NOME
   const nextState = detectNextState(userMessage, session.state, updatedProfile)
 
   // Salva mensagem do usuário
