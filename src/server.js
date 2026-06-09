@@ -87,35 +87,15 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // Verifica se é comando /responder enviado pelo próprio João
-    // IMPORTANTE: este check vem ANTES do filtro fromMe para que o João
-    // consiga usar /responder a partir do seu próprio número
+    // Comandos do João via WhatsApp — ANTES do filtro fromMe
     const joaoPhone = process.env.JOAO_PHONE_NUMBER
     const normalizeForCompare = (n) => n.replace('@s.whatsapp.net', '').replace(/\D/g, '').replace(/^55(\d{2})9(\d{8})$/, '55$1$2')
     if (joaoPhone && normalizeForCompare(phone) === normalizeForCompare(joaoPhone)) {
-      const cmd = parseResponderCommand(text, phone)
-      if (cmd) {
-        console.log(`[Responder] Comando detectado — target: ${cmd.targetPhone} | msg: "${cmd.message}"`)
-        try {
-          // Normaliza o número do cliente para bater com o que está na sessão
-          const targetNorm = normalizePhone(cmd.targetPhone)
-          console.log(`[Responder] Número normalizado: ${cmd.targetPhone} → ${targetNorm}`)
-          const sent = await sendWhatsAppMessage(targetNorm, cmd.message)
-          console.log(`[Responder] Envio: ${sent ? 'OK' : 'FALHOU'}`)
-          await addMessage(targetNorm, 'assistant', cmd.message)
-          // Retoma sessão no estado de triagem adequado (não hardcoded)
-          const clientSession = await getSession(targetNorm)
-          const resumeState = clientSession?.profile?.finalidade === 'venda'
-            ? 'TRIAGEM_COMPRA' : 'TRIAGEM_LOCACAO'
-          await updateSession(targetNorm, { state: resumeState })
-          console.log(`[Responder] Sessão retomada em ${resumeState} para ${targetNorm}`)
-        } catch (err) {
-          console.error('[Responder] Erro ao processar comando:', err.message)
-        }
-        return
-      }
-      console.log(`[Responder] Mensagem do João não é /responder — ignorando`)
-      return // Mensagens do próprio João que não são /responder não são processadas
+      const handled = await handleJoaoCommand(text, phone)
+      if (handled) return
+      // Mensagem do João que não é comando — ignora
+      console.log(`[Comandos] Mensagem do João ignorada (não é comando): "${text}"`)
+      return
     }
 
     // Ignora mensagens enviadas pelo próprio número (evita loop)
@@ -173,17 +153,100 @@ app.post('/responder', async (req, res) => {
   }
 })
 
-// Também aceita via webhook quando João manda /responder pelo próprio WhatsApp
-function parseResponderCommand(text, fromPhone) {
-  if (!text || !text.startsWith('/responder')) return null
-  const parts = text.replace('/responder', '').trim().split(' ')
-  const targetPhone = parts[0]
-  const message = parts.slice(1).join(' ')
-  if (!targetPhone || !message) return null
-  return { targetPhone, message }
+// Processa todos os comandos que João pode mandar pelo próprio WhatsApp
+// Retorna true se o comando foi reconhecido e tratado
+async function handleJoaoCommand(text, fromPhone) {
+  if (!text) return false
+  const trim = text.trim()
+
+  // /responder 5543XXXXX mensagem
+  if (trim.startsWith('/responder')) {
+    const parts = trim.replace('/responder', '').trim().split(' ')
+    const targetPhone = normalizePhone(parts[0])
+    const message = parts.slice(1).join(' ')
+    if (!targetPhone || !message) {
+      await sendWhatsAppMessage(fromPhone, 'Uso: /responder [numero] [mensagem]')
+      return true
+    }
+    const sent = await sendWhatsAppMessage(targetPhone, message)
+    await addMessage(targetPhone, 'assistant', message)
+    const clientSession = await getSession(targetPhone)
+    const resumeState = clientSession?.profile?.finalidade === 'venda' ? 'TRIAGEM_COMPRA' : 'TRIAGEM_LOCACAO'
+    await updateSession(targetPhone, { state: resumeState })
+    await sendWhatsAppMessage(fromPhone, sent ? `Enviado para ${targetPhone}` : `Falha ao enviar para ${targetPhone}`)
+    console.log(`[Comandos] /responder → ${targetPhone}: "${message}"`)
+    return true
+  }
+
+  // /pausar geral
+  if (trim === '/pausar geral') {
+    const { createClient } = require('@supabase/supabase-js')
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    await sb.from('config').upsert({ key: 'agent_paused', value: 'true' })
+    await sendWhatsAppMessage(fromPhone, 'Agente pausado para todos os leads.')
+    console.log('[Comandos] Agente pausado globalmente')
+    return true
+  }
+
+  // /reativar geral
+  if (trim === '/reativar geral') {
+    const { createClient } = require('@supabase/supabase-js')
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    await sb.from('config').upsert({ key: 'agent_paused', value: 'false' })
+    await sendWhatsAppMessage(fromPhone, 'Agente reativado para todos os leads.')
+    console.log('[Comandos] Agente reativado globalmente')
+    return true
+  }
+
+  // /pausar 5543XXXXX
+  if (trim.startsWith('/pausar ')) {
+    const targetPhone = normalizePhone(trim.replace('/pausar', '').trim())
+    if (!targetPhone) return false
+    await updateSession(targetPhone, { state: 'AGUARDANDO_JOAO' })
+    await sendWhatsAppMessage(fromPhone, `Atendimento pausado para ${targetPhone}.`)
+    console.log(`[Comandos] /pausar → ${targetPhone}`)
+    return true
+  }
+
+  // /reativar 5543XXXXX
+  if (trim.startsWith('/reativar ')) {
+    const targetPhone = normalizePhone(trim.replace('/reativar', '').trim())
+    if (!targetPhone) return false
+    const clientSession = await getSession(targetPhone)
+    const resumeState = clientSession?.profile?.finalidade === 'venda' ? 'TRIAGEM_COMPRA' : 'TRIAGEM_LOCACAO'
+    await updateSession(targetPhone, { state: resumeState })
+    await sendWhatsAppMessage(fromPhone, `Atendimento retomado para ${targetPhone}.`)
+    console.log(`[Comandos] /reativar → ${targetPhone}`)
+    return true
+  }
+
+  // /contexto 5543XXXXX [informações]
+  if (trim.startsWith('/contexto ')) {
+    const rest = trim.replace('/contexto', '').trim()
+    const parts = rest.split(' ')
+    const targetPhone = normalizePhone(parts[0])
+    const contexto = parts.slice(1).join(' ')
+    if (!targetPhone || !contexto) {
+      await sendWhatsAppMessage(fromPhone, 'Uso: /contexto [numero] [informações do cliente]')
+      return true
+    }
+    // Garante que a sessão existe
+    const { getOrCreateSession } = require('./supabase')
+    const clientSession = await getOrCreateSession(targetPhone)
+    const profile = clientSession?.profile || {}
+    profile.contexto_manual = contexto
+    await updateSession(targetPhone, { profile })
+    // Registra como mensagem interna no histórico
+    await addMessage(targetPhone, 'assistant', `[Contexto adicionado por João]: ${contexto}`)
+    await sendWhatsAppMessage(fromPhone, `Contexto salvo para ${targetPhone}.`)
+    console.log(`[Comandos] /contexto → ${targetPhone}: "${contexto}"`)
+    return true
+  }
+
+  return false // comando não reconhecido
 }
 
-module.exports.parseResponderCommand = parseResponderCommand
+module.exports.handleJoaoCommand = handleJoaoCommand
 
 // Endpoint de teste manual (desenvolvimento)
 app.post('/test', async (req, res) => {

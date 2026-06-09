@@ -296,9 +296,27 @@ function extractProfileData(text, currentProfile, currentState) {
   return updated
 }
 
+// Verifica se o agente está pausado globalmente (tabela config no Supabase)
+async function isAgentPausedGlobally() {
+  try {
+    const { createClient } = require('@supabase/supabase-js')
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    const { data } = await sb.from('config').select('value').eq('key', 'agent_paused').single()
+    return data?.value === 'true'
+  } catch (_) {
+    return false
+  }
+}
+
 // Motor principal do agente
 async function processMessage(phone, userMessage, pushName) {
   console.log(`[Agente] Processando mensagem de ${phone}: "${userMessage}"`)
+
+  // Verifica pausa global
+  if (await isAgentPausedGlobally()) {
+    console.log(`[Agente] Pausado globalmente — mensagem de ${phone} ignorada`)
+    return null
+  }
 
   // Busca ou cria sessão
   const isNewSession = !(await getSession(phone))

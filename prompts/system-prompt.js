@@ -214,8 +214,15 @@ function buildContextPrompt(session) {
   if (hourBrasilia >= 5 && hourBrasilia < 12) saudacao = 'Bom dia'
   else if (hourBrasilia >= 12 && hourBrasilia < 18) saudacao = 'Boa tarde'
 
-  const profileText = Object.keys(profile).length > 0
-    ? `\nPerfil do cliente:\n${JSON.stringify(profile, null, 2)}`
+  // Contexto manual injetado por João via /contexto — tem prioridade máxima
+  const contextoManual = profile.contexto_manual
+    ? `\n\n⚠️ CONTEXTO ADICIONADO MANUALMENTE (use isso — não pergunte o que já está aqui):\n${profile.contexto_manual}`
+    : ''
+
+  const profileSemContexto = { ...profile }
+  delete profileSemContexto.contexto_manual
+  const profileText = Object.keys(profileSemContexto).length > 0
+    ? `\nPerfil do cliente:\n${JSON.stringify(profileSemContexto, null, 2)}`
     : ''
 
   const historyText = messages && messages.length > 0
@@ -241,7 +248,7 @@ function buildContextPrompt(session) {
 
 Saudação correta para agora: ${saudacao}
 Estado atual da conversa: ${state}
-${profileText}
+${profileText}${contextoManual}
 ${historyText}
 ${imoveisText}
 
