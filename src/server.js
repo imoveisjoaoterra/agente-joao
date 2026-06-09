@@ -5,6 +5,7 @@ const { normalizePhone, resolveLid } = require('./evolution')
 const { getSession, updateSession, addMessage } = require('./supabase')
 const { sendWhatsAppMessage } = require('./evolution')
 const { transcribeAudio } = require('./transcribe')
+const { processMessengerMessage } = require('./messenger-agent')
 
 const app = express()
 app.use(express.json())
@@ -199,9 +200,52 @@ app.post('/test', async (req, res) => {
   }
 })
 
+// Webhook Messenger — verificação (GET)
+app.get('/webhook/messenger', (req, res) => {
+  const VERIFY_TOKEN = process.env.MESSENGER_VERIFY_TOKEN
+  const mode = req.query['hub.mode']
+  const token = req.query['hub.verify_token']
+  const challenge = req.query['hub.challenge']
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('[Messenger] Webhook verificado com sucesso')
+    res.status(200).send(challenge)
+  } else {
+    console.error('[Messenger] Falha na verificação do webhook')
+    res.sendStatus(403)
+  }
+})
+
+// Webhook Messenger — recebe mensagens (POST)
+app.post('/webhook/messenger', (req, res) => {
+  res.status(200).send('EVENT_RECEIVED')
+
+  const body = req.body
+  if (body.object !== 'page') return
+
+  for (const entry of body.entry || []) {
+    for (const event of entry.messaging || []) {
+      // Ignora eco das próprias mensagens enviadas pelo app
+      if (event.message?.is_echo) continue
+      // Só processa mensagens de texto
+      if (!event.message?.text) continue
+
+      const senderId = event.sender.id
+      const text = event.message.text
+      // senderName não vem no evento — será buscado via API se necessário
+      const senderName = ''
+
+      processMessengerMessage(senderId, text, senderName).catch(err => {
+        console.error('[Messenger] Erro ao processar mensagem:', err.message)
+      })
+    }
+  }
+})
+
 app.listen(PORT, () => {
   console.log(`[Servidor] Agente João Terra Imóveis v2.0 rodando na porta ${PORT}`)
-  console.log(`[Servidor] Webhook: POST /webhook`)
+  console.log(`[Servidor] Webhook WhatsApp:  POST /webhook`)
+  console.log(`[Servidor] Webhook Messenger: GET|POST /webhook/messenger`)
   console.log(`[Servidor] Health: GET /health`)
   console.log(`[Servidor] Teste: POST /test`)
 })
