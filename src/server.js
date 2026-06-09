@@ -4,6 +4,7 @@ const { processMessage } = require('./agent')
 const { normalizePhone, resolveLid } = require('./evolution')
 const { getSession, updateSession, addMessage } = require('./supabase')
 const { sendWhatsAppMessage } = require('./evolution')
+const { transcribeAudio } = require('./transcribe')
 
 const app = express()
 app.use(express.json())
@@ -38,10 +39,23 @@ app.post('/webhook', async (req, res) => {
     if (message.key?.fromMe === true) return
 
     // Extrai texto da mensagem
-    const text =
+    let text =
       message.message?.conversation ||
       message.message?.extendedTextMessage?.text ||
       message.message?.buttonsResponseMessage?.selectedDisplayText
+
+    // Trata mensagem de áudio — transcreve via Whisper
+    if (!text && message.message?.audioMessage) {
+      console.log('[Webhook] Áudio recebido — transcrevendo...')
+      const transcribed = await transcribeAudio(message.key)
+      if (transcribed) {
+        text = transcribed
+        console.log(`[Webhook] Áudio transcrito: "${text}"`)
+      } else {
+        console.log('[Webhook] Falha na transcrição — áudio ignorado')
+        return
+      }
+    }
 
     if (!text || text.trim() === '') return
 
