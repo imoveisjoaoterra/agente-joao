@@ -1,7 +1,7 @@
 require('dotenv').config()
 const Anthropic = require('@anthropic-ai/sdk')
 const { buildContextPrompt } = require('../prompts/system-prompt')
-const { getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
+const { getSession, getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
 const { addLead, updateLead, stateToStatus } = require('./sheets')
 
