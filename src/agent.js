@@ -3,7 +3,7 @@ const Anthropic = require('@anthropic-ai/sdk')
 const { buildContextPrompt } = require('../prompts/system-prompt')
 const { getSession, getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
-const { addLead, updateLead, stateToStatus } = require('./sheets')
+const { addLead, updateLead, stateToStatus, buildObservacoes } = require('./sheets')
 const { applyLabel } = require('./labels')
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -423,16 +423,17 @@ async function processMessage(phone, userMessage, pushName) {
   // Aplica etiqueta no WhatsApp Business conforme estado
   await applyLabel(phone, finalState)
 
-  // Atualiza planilha com dados do perfil e status atual
+  // Atualiza planilha com dados do perfil, status e resumo da conversa
   await updateLead(phone, {
     nome: updatedProfile.nome,
     regiao: updatedProfile.regiao,
     tipo: updatedProfile.tipo,
     quartos: updatedProfile.quartos,
-    orcamento: updatedProfile.orcamento ? `R$ ${updatedProfile.orcamento}` : undefined,
+    orcamento: updatedProfile.orcamento ? `R$ ${Number(updatedProfile.orcamento).toLocaleString('pt-BR')}` : undefined,
     cpf: updatedProfile.cpf ? (updatedProfile.cpfStatus || 'Aguardando') : undefined,
     status: stateToStatus(finalState),
-    tipoContato: updatedProfile.finalidade === 'captacao' ? 'Proprietário' : 'Locatário'
+    tipoContato: updatedProfile.finalidade === 'captacao' ? 'Proprietário' : 'Locatário',
+    observacoes: buildObservacoes(updatedProfile, finalState)
   })
 
   console.log(`[Agente] Estado: ${session.state} → ${finalState} | Resposta enviada`)
