@@ -2,7 +2,7 @@ require('dotenv').config()
 const { google } = require('googleapis')
 
 const SPREADSHEET_ID = '1VH5oNOM4zXqeEComqUpRV62ePxvTMW_n0zQ5Xgekxzk'
-const SHEET_NAME = 'Triagem de Leads'
+const SHEET_NAME = "'Triagem de Leads'"
 const HEADER_ROWS = 4 // linhas 1-4 são cabeçalho — dados começam na linha 5
 
 // Inicializa cliente Google Sheets via credencial da conta de serviço
