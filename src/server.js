@@ -131,8 +131,8 @@ app.post('/webhook', async (req, res) => {
 
     console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
 
-    // Processa a mensagem no agente
-    await processMessage(phone, text)
+    // Processa a mensagem no agente (passa pushName para salvar nome do WhatsApp no perfil)
+    await processMessage(phone, text, pushName)
 
   } catch (err) {
     console.error('[Webhook] Erro ao processar mensagem:', err.message)

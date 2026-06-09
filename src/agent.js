@@ -79,7 +79,10 @@ function wantsToSeeProperties(text) {
     'pode mandar', 'manda', 'mostra', 'tem algo', 'tem alguma', 'tem opç',
     'quero ver', 'pode ver', 'tem disponível', 'tem disponivel',
     'tem imóve', 'tem imove', 'opções disponíve', 'opcoes disponive',
-    'me mostra', 'pode enviar', 'fotos'
+    'me mostra', 'pode enviar', 'fotos',
+    'encontrou', 'achou', 'localizou', 'tem algum', 'algum disponível',
+    'algum disponivel', 'ver opç', 'quais são', 'quais tem',
+    'imóvel pra mim', 'imovel pra mim', 'tem pra mim'
   ]
   return triggers.some(t => lower.includes(t))
 }
@@ -296,7 +299,7 @@ function extractProfileData(text, currentProfile, currentState) {
 }
 
 // Motor principal do agente
-async function processMessage(phone, userMessage) {
+async function processMessage(phone, userMessage, pushName) {
   console.log(`[Agente] Processando mensagem de ${phone}: "${userMessage}"`)
 
   // Busca ou cria sessão
@@ -307,14 +310,19 @@ async function processMessage(phone, userMessage) {
     return null
   }
 
-  // Novo lead — cria linha na planilha (com nome se já vier na 1ª mensagem)
+  // Novo lead — cria linha na planilha (com nome se já vier na 1ª mensagem ou do pushName)
   if (isNewSession) {
-    const nomeInicial = extractNome(userMessage) || ''
+    const nomeInicial = extractNome(userMessage) || pushName || ''
     await addLead({ phone, nome: nomeInicial, origem: 'WhatsApp' })
   }
 
   // Extrai dados de perfil da mensagem (passa estado atual para captura de nome)
-  const updatedProfile = extractProfileData(userMessage, session.profile || {}, session.state)
+  let updatedProfile = extractProfileData(userMessage, session.profile || {}, session.state)
+
+  // Captura nome do pushName do WhatsApp se ainda não tiver nome no perfil
+  if (!updatedProfile.nome && pushName) {
+    updatedProfile.nome = pushName
+  }
 
   // Detecta próximo estado
   const nextState = detectNextState(userMessage, session.state, updatedProfile)
@@ -362,13 +370,14 @@ async function processMessage(phone, userMessage) {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 400,
-      system: contextualPrompt + `\n\nREGRAS CRÍTICAS:\n1. Se não houver imóveis na lista do contexto (lista vazia ou ausente), responda OBRIGATORIAMENTE com [AGUARDANDO_JOAO] + mensagem curta. Ex: "[AGUARDANDO_JOAO] Não encontrei nada com esse perfil agora, mas vou verificar e te retorno em breve."\n2. Se faltar informação para responder com precisão, use [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Deixa eu verificar aqui e te retorno rapidinho."\n3. NUNCA mencione imóveis que não estão na lista fornecida. NUNCA invente links. Use [AGUARDANDO_JOAO] se não tiver opções.\n4. NUNCA repita o nome do cliente nas mensagens.\n5. Respostas máximo 2 frases. Sem emojis.`,
+      system: contextualPrompt + `\n\nREGRAS ABSOLUTAS — SIGA EXATAMENTE:\n1. Se não houver imóveis na lista do contexto (lista vazia ou ausente), comece a resposta EXATAMENTE com [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Vou verificar aqui e te retorno em breve."\n2. Se faltar informação para responder com precisão, comece com [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Deixa eu confirmar isso aqui."\n3. NUNCA mencione imóveis que não estão na lista fornecida. NUNCA invente links.\n4. NUNCA use o nome do cliente, NUNCA use o nome "João" em nenhuma mensagem. Nunca mencione que vai "passar para alguém" ou "chamar alguém". Você é o atendimento — fale sempre em primeira pessoa.\n5. Respostas máximo 2 frases curtas. Sem emojis. Sem desculpas.\n6. O marcador [AGUARDANDO_JOAO] deve ser SEMPRE o início da resposta, nunca no meio ou no fim.`,
       messages: [{ role: 'user', content: userMessage }]
     })
     const raw = response.content[0].text
-    if (raw.startsWith('[AGUARDANDO_JOAO]')) {
+    // Detecta o marcador em qualquer posição da resposta (Claude às vezes coloca no meio/fim)
+    if (raw.includes('[AGUARDANDO_JOAO]')) {
       needsJoao = true
-      agentResponse = raw.replace('[AGUARDANDO_JOAO]', '').trim()
+      agentResponse = raw.replace(/\[AGUARDANDO_JOAO\]/g, '').trim()
     } else {
       agentResponse = raw
     }
