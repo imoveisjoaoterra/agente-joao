@@ -251,6 +251,7 @@ async function searchImoveis({ tipo, quartos, regiao, orcamento, finalidade } = 
 }
 
 module.exports = {
+  getClient,
   getSession,
   createSession,
   updateSession,

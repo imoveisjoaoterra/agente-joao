@@ -2,7 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const { processMessage } = require('./agent')
 const { normalizePhone, resolveLid } = require('./evolution')
-const { getSession, updateSession, addMessage } = require('./supabase')
+const { getSession, updateSession, addMessage, getClient } = require('./supabase')
 const { sendWhatsAppMessage } = require('./evolution')
 const { transcribeAudio } = require('./transcribe')
 const { processMessengerMessage } = require('./messenger-agent')
@@ -180,8 +180,7 @@ async function handleJoaoCommand(text, fromPhone) {
 
   // /pausar geral
   if (trim === '/pausar geral') {
-    const { createClient } = require('@supabase/supabase-js')
-    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    const sb = getClient()
     await sb.from('config').upsert({ key: 'agent_paused', value: 'true' })
     await sendWhatsAppMessage(fromPhone, 'Agente pausado para todos os leads.')
     console.log('[Comandos] Agente pausado globalmente')
@@ -190,8 +189,7 @@ async function handleJoaoCommand(text, fromPhone) {
 
   // /reativar geral
   if (trim === '/reativar geral') {
-    const { createClient } = require('@supabase/supabase-js')
-    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    const sb = getClient()
     await sb.from('config').upsert({ key: 'agent_paused', value: 'false' })
     await sendWhatsAppMessage(fromPhone, 'Agente reativado para todos os leads.')
     console.log('[Comandos] Agente reativado globalmente')

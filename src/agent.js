@@ -1,7 +1,7 @@
 require('dotenv').config()
 const Anthropic = require('@anthropic-ai/sdk')
 const { buildContextPrompt } = require('../prompts/system-prompt')
-const { getSession, getOrCreateSession, updateSession, addMessage, searchImoveis } = require('./supabase')
+const { getSession, getOrCreateSession, updateSession, addMessage, searchImoveis, getClient } = require('./supabase')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
 const { addLead, updateLead, stateToStatus, buildObservacoes } = require('./sheets')
 const { applyLabel } = require('./labels')
@@ -299,8 +299,7 @@ function extractProfileData(text, currentProfile, currentState) {
 // Verifica se o agente está pausado globalmente (tabela config no Supabase)
 async function isAgentPausedGlobally() {
   try {
-    const { createClient } = require('@supabase/supabase-js')
-    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    const sb = getClient()
     const { data } = await sb.from('config').select('value').eq('key', 'agent_paused').single()
     return data?.value === 'true'
   } catch (_) {
