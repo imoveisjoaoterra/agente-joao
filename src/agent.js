@@ -6,6 +6,7 @@ const { searchImoveisLiveSite } = require('./scraper')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
 const { addLead, updateLead, stateToStatus, buildObservacoes } = require('./sheets')
 const { applyLabel } = require('./labels')
+const { getAvailableSlots, createVisitEvent, extractConfirmedDatetime } = require('./calendar')
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -38,18 +39,20 @@ const STATES = {
   ENCERRADO: 'ENCERRADO'
 }
 
-// Detecta se deve acionar João
+// Detecta se deve acionar João (visita/agendar NÃO escalate — vão pro fluxo de calendário)
 function shouldEscalateToJoao(text, state) {
-  // Gatilhos de alta intenção (ver achado 3 do QA — removidos 'quero ver' e
-  // 'ver o imóvel' por se sobreporem a wantsToSeeProperties e gerarem
-  // alerta em excesso para quem só está navegando opções)
   const triggers = [
-    'visitar', 'visita', 'agendar',
     'falar com joão', 'falar com o joão', 'responsável', 'negociar',
     'desconto', 'reduzir', 'valor menor'
   ]
   const lower = text.toLowerCase()
   return triggers.some(t => lower.includes(t)) || state === STATES.NOTIFICA_JOAO
+}
+
+// Detecta intenção de agendar visita a imóvel
+function wantsToScheduleVisit(text) {
+  const lower = text.toLowerCase()
+  return /\b(visitar|agendar|marcar|ver pessoalmente|quero ver|fazer uma visita|visita|quando posso ir|quando consigo ir)\b/.test(lower)
 }
 
 // Detecta CPF na mensagem
@@ -350,9 +353,56 @@ async function processMessage(phone, userMessage, pushName) {
   // Verifica se deve acionar João
   const escalate = shouldEscalateToJoao(userMessage, nextState)
 
+  // CPF recebido → notifica João mas NÃO bloqueia o agente
+  const cpfRecebido = updatedProfile.cpf && !session.profile?.cpf
+  if (cpfRecebido) {
+    await notifyJoao(`#CPF — ${updatedProfile.nome || phone} (${phone}) — CPF: ${updatedProfile.cpf}`)
+    console.log(`[Agente] CPF recebido de ${phone} — João notificado (sem bloquear)`)
+  }
+
+  // Fluxo de agendamento de visita via Google Calendar
+  let calendarSlotsText = ''
+  let confirmingVisit = false
+
+  if (wantsToScheduleVisit(userMessage) && session.state !== STATES.VISITA_AGENDADA) {
+    // Cliente quer agendar — busca slots disponíveis
+    console.log(`[Agente] Intenção de visita detectada — buscando slots na agenda...`)
+    const slots = await getAvailableSlots()
+    if (slots.length >= 2) {
+      updatedProfile.calendar_slots_pending = slots.map(s => ({ date: s.date.toISOString(), label: s.label }))
+      calendarSlotsText = `\n\n[AGENDA DISPONÍVEL — injete esses horários na resposta, apresente como duas opções, não mencione calendário ou sistema]:\nOpção 1: ${slots[0].label}\nOpção 2: ${slots[1].label}\nPergunta ao cliente: qual desses horários fica melhor pra você?`
+    } else if (slots.length === 1) {
+      updatedProfile.calendar_slots_pending = slots.map(s => ({ date: s.date.toISOString(), label: s.label }))
+      calendarSlotsText = `\n\n[AGENDA DISPONÍVEL — apenas 1 slot livre nos próximos dias]:\nOpção: ${slots[0].label}\nPergunte se esse horário serve.`
+    } else {
+      calendarSlotsText = `\n\n[SEM SLOTS DISPONÍVEIS — diga que vai verificar a agenda e retorna em breve. NÃO use [AGUARDANDO_JOAO].]`
+    }
+  } else if (session.profile?.calendar_slots_pending?.length) {
+    // Cliente pode estar confirmando um horário já sugerido
+    const pendingSlots = session.profile.calendar_slots_pending.map(s => ({ date: new Date(s.date), label: s.label }))
+    const confirmedDate = extractConfirmedDatetime(userMessage, pendingSlots)
+    if (confirmedDate) {
+      confirmingVisit = true
+      const imovelNome = updatedProfile.imovel_interesse || 'imóvel de interesse'
+      const result = await createVisitEvent({
+        nome: updatedProfile.nome || '',
+        phone,
+        imovel: imovelNome,
+        datetime: confirmedDate
+      })
+      if (result.ok) {
+        await notifyJoao(`#VISITA AGENDADA — ${updatedProfile.nome || phone} (${phone})\nHorário: ${result.label}\nImóvel: ${imovelNome}`)
+        updatedProfile.calendar_slots_pending = null
+        updatedProfile.visita_agendada = result.label
+        calendarSlotsText = `\n\n[VISITA CONFIRMADA — evento criado na agenda para ${result.label}. Confirme ao cliente de forma natural, sem mencionar agenda/sistema. Diga que está marcado.]`
+        console.log(`[Agente] Visita criada na agenda para ${phone}: ${result.label}`)
+      } else {
+        calendarSlotsText = `\n\n[ERRO AO CRIAR EVENTO — diga que vai confirmar e retorna em breve. NÃO use [AGUARDANDO_JOAO].]`
+      }
+    }
+  }
+
   // Busca imóveis SOMENTE quando o cliente pedir explicitamente
-  // (decisão registrada em 07_LOGS/decisions.md, 2026-06-07 — evita
-  // "empurrar" lista sem o cliente ter pedido)
   let imoveis
   if (wantsToSeeProperties(userMessage)) {
     imoveis = await searchImoveisLiveSite({
@@ -368,7 +418,7 @@ async function processMessage(phone, userMessage, pushName) {
   // Monta contexto para o Claude
   const contextualPrompt = buildContextPrompt({
     ...session,
-    state: nextState,
+    state: confirmingVisit ? STATES.VISITA_AGENDADA : nextState,
     profile: updatedProfile,
     messages: [...(session.messages || []), { role: 'user', content: userMessage }],
     imoveis
@@ -387,11 +437,10 @@ async function processMessage(phone, userMessage, pushName) {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 400,
-      system: contextualPrompt + `\n\nREGRAS ABSOLUTAS — SIGA EXATAMENTE:\n1. Se não houver imóveis na lista do contexto (lista vazia ou ausente), comece a resposta EXATAMENTE com [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Vou verificar aqui e te retorno em breve."\n2. Se faltar informação para responder com precisão, comece com [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Deixa eu confirmar isso aqui."\n3. NUNCA mencione imóveis que não estão na lista fornecida. NUNCA invente links.\n4. NUNCA use o nome do cliente, NUNCA use o nome "João" em nenhuma mensagem. Nunca mencione que vai "passar para alguém" ou "chamar alguém". Você é o atendimento — fale sempre em primeira pessoa.\n5. Respostas máximo 2 frases curtas. Sem emojis. Sem desculpas.\n6. O marcador [AGUARDANDO_JOAO] deve ser SEMPRE o início da resposta, nunca no meio ou no fim.`,
+      system: contextualPrompt + calendarSlotsText + `\n\nREGRAS ABSOLUTAS — SIGA EXATAMENTE:\n1. Se não houver imóveis na lista do contexto (lista vazia ou ausente), comece a resposta EXATAMENTE com [AGUARDANDO_JOAO]. Ex: "[AGUARDANDO_JOAO] Vou verificar aqui e te retorno em breve."\n2. Use [AGUARDANDO_JOAO] SOMENTE para dúvidas jurídicas, contratuais, situações completamente fora do roteiro ou negociação de valores. Para visitas, CPF e perguntas comuns: responda normalmente.\n3. NUNCA mencione imóveis que não estão na lista fornecida. NUNCA invente links.\n4. NUNCA use o nome do cliente, NUNCA use o nome "João" em nenhuma mensagem. Nunca mencione que vai "passar para alguém" ou "chamar alguém". Você é o atendimento — fale sempre em primeira pessoa.\n5. Respostas máximo 2 frases curtas. Sem emojis. Sem desculpas.\n6. O marcador [AGUARDANDO_JOAO] deve ser SEMPRE o início da resposta, nunca no meio ou no fim.`,
       messages: [{ role: 'user', content: userMessage }]
     })
     const raw = response.content[0].text
-    // Detecta o marcador em qualquer posição da resposta (Claude às vezes coloca no meio/fim)
     if (raw.includes('[AGUARDANDO_JOAO]')) {
       needsJoao = true
       agentResponse = raw.replace(/\[AGUARDANDO_JOAO\]/g, '').trim()
@@ -404,7 +453,8 @@ async function processMessage(phone, userMessage, pushName) {
   }
 
   // Define estado final
-  const finalState = needsJoao ? STATES.AGUARDANDO_JOAO : nextState
+  let finalState = needsJoao ? STATES.AGUARDANDO_JOAO : nextState
+  if (confirmingVisit && !needsJoao) finalState = STATES.VISITA_AGENDADA
 
   // Atualiza sessão
   await updateSession(phone, {
@@ -426,15 +476,10 @@ async function processMessage(phone, userMessage, pushName) {
     console.log(`[Agente] Sessão pausada — João notificado para ${phone}`)
   }
 
-  // Notifica João em outros casos críticos
-  if (!needsJoao && (escalate || nextState === STATES.NOTIFICA_JOAO)) {
-    const cpf = updatedProfile.cpf || extractCPF(userMessage)
-    const alertMsg = cpf
-      ? `#VISITA — ${phone} — CPF: ${cpf} — pré-aprovação pendente — perfil: ${JSON.stringify(updatedProfile)}`
-      : `#URGENTE — ${phone} — ${userMessage} — estado: ${nextState}`
-
-    await notifyJoao(alertMsg)
-    console.log(`[Agente] João notificado: ${alertMsg}`)
+  // Notifica João em outros casos de escalação (negociação, pedido de responsável)
+  if (!needsJoao && escalate) {
+    await notifyJoao(`#URGENTE — ${updatedProfile.nome || phone} (${phone})\n${userMessage}`)
+    console.log(`[Agente] João notificado: escalação detectada para ${phone}`)
   }
 
   // Aplica etiqueta no WhatsApp Business conforme estado
