@@ -234,9 +234,9 @@ function buildContextPrompt(session) {
     if (imoveis.length > 0) {
       imoveisText = `\nImóveis disponíveis (use SOMENTE estes dados — NUNCA invente ou mencione outros imóveis):\n` +
         imoveis.map(im =>
-          `- ${im.title} | ${im.neighborhood_name} | ${im.bedrooms} quartos | ` +
+          `- ${im.title} | ${im.neighborhood_name} | ${im.bedrooms ? im.bedrooms + ' quartos' : ''} | ` +
           `${im.price ? 'R$ ' + Number(im.price).toLocaleString('pt-BR') : 'consulte valor'} | ` +
-          `ficha: https://joaoterraimoveis.com.br/imoveis/${im.slug}`
+          `ficha: ${im.slug}`
         ).join('\n') +
         `\n\nIMPORTANTE: Apresente apenas os imóveis da lista acima. Use o link exato de cada um. Não invente outros.`
     } else {

@@ -1,7 +1,8 @@
 require('dotenv').config()
 const Anthropic = require('@anthropic-ai/sdk')
 const { buildContextPrompt } = require('../prompts/system-prompt')
-const { getSession, getOrCreateSession, updateSession, addMessage, searchImoveis, getClient } = require('./supabase')
+const { getSession, getOrCreateSession, updateSession, addMessage, getClient } = require('./supabase')
+const { searchImoveisLiveSite } = require('./scraper')
 const { sendWhatsAppMessage, notifyJoao } = require('./evolution')
 const { addLead, updateLead, stateToStatus, buildObservacoes } = require('./sheets')
 const { applyLabel } = require('./labels')
@@ -354,7 +355,7 @@ async function processMessage(phone, userMessage, pushName) {
   // "empurrar" lista sem o cliente ter pedido)
   let imoveis
   if (wantsToSeeProperties(userMessage)) {
-    imoveis = await searchImoveis({
+    imoveis = await searchImoveisLiveSite({
       tipo: updatedProfile.tipo,
       quartos: updatedProfile.quartos,
       regiao: updatedProfile.regiao,
