@@ -248,6 +248,17 @@ async function handleJoaoCommand(text, fromPhone) {
 
 module.exports.handleJoaoCommand = handleJoaoCommand
 
+// Endpoint de debug do calendário
+app.get('/debug-calendar', async (req, res) => {
+  try {
+    const { getAvailableSlots } = require('./calendar')
+    const slots = await getAvailableSlots()
+    res.json({ ok: true, slots, calendarId: process.env.GOOGLE_CALENDAR_ID, hasCredentials: !!process.env.GOOGLE_SHEETS_CREDENTIALS })
+  } catch (err) {
+    res.json({ ok: false, error: err.message, stack: err.stack?.slice(0, 500) })
+  }
+})
+
 // Endpoint de teste manual (desenvolvimento)
 app.post('/test', async (req, res) => {
   const { phone, message } = req.body
