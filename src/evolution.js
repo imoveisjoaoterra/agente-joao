@@ -116,4 +116,27 @@ async function resolveLid(lidJid, pushName) {
   return null
 }
 
-module.exports = { sendWhatsAppMessage, notifyJoao, normalizePhone, resolveLid }
+// Busca o nome salvo na agenda de João para um número (não o pushName do WhatsApp)
+// Retorna o primeiro nome salvo, ou null se não estiver na agenda
+async function getAgendaName(phone) {
+  try {
+    const number = normalizePhone(phone)
+    const jid = `${number}@s.whatsapp.net`
+    const response = await axios.post(
+      `${EVOLUTION_URL}/chat/findContacts/${INSTANCE}`,
+      { where: { id: jid } },
+      { headers, timeout: 5000 }
+    )
+    const contacts = Array.isArray(response.data) ? response.data : []
+    const contact = contacts.find(c => c.id === jid || c.id?.startsWith(number))
+    if (!contact) return null
+    // "name" é o nome salvo na agenda local; "pushName" é o nome do WhatsApp do cliente
+    const savedName = contact.name || contact.notify || null
+    if (!savedName) return null
+    return savedName.split(' ')[0] // só primeiro nome
+  } catch (_) {
+    return null
+  }
+}
+
+module.exports = { sendWhatsAppMessage, notifyJoao, normalizePhone, resolveLid, getAgendaName }

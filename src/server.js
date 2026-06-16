@@ -1,7 +1,7 @@
 require('dotenv').config()
 const express = require('express')
 const { processMessage } = require('./agent')
-const { normalizePhone, resolveLid } = require('./evolution')
+const { normalizePhone, resolveLid, getAgendaName } = require('./evolution')
 const { getSession, updateSession, addMessage, getClient } = require('./supabase')
 const { sendWhatsAppMessage } = require('./evolution')
 const { transcribeAudio } = require('./transcribe')
@@ -112,10 +112,12 @@ app.post('/webhook', async (req, res) => {
       // Sessão ativa — deixa passar pra continuar a conversa
     }
 
-    console.log(`[Webhook] Nova mensagem | De: ${phone} (${pushName}) | Texto: "${text}"`)
+    // Prioridade: nome salvo na agenda de João → pushName do WhatsApp → null
+    const agendaName = await getAgendaName(phone)
+    const nomeEfetivo = agendaName || pushName
+    console.log(`[Webhook] Nova mensagem | De: ${phone} | Agenda: ${agendaName || '-'} | WhatsApp: ${pushName || '-'} | Texto: "${text}"`)
 
-    // Processa a mensagem no agente (passa pushName para salvar nome do WhatsApp no perfil)
-    await processMessage(phone, text, pushName)
+    await processMessage(phone, text, nomeEfetivo)
 
   } catch (err) {
     console.error('[Webhook] Erro ao processar mensagem:', err.message)
