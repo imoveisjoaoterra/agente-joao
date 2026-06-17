@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000
 
 // Debounce de mensagens — aguarda 4s antes de processar, juntando mensagens do mesmo número
 const messageQueues = new Map() // phone → { timer, messages[], nomeEfetivo, isAgendaContact }
-const DEBOUNCE_MS = 4000
+const DEBOUNCE_MS = 10000
 
 function enqueueMessage(phone, text, nomeEfetivo, isAgendaContact) {
   const existing = messageQueues.get(phone) || { messages: [], nomeEfetivo, isAgendaContact }
