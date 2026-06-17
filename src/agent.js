@@ -19,7 +19,8 @@ const STATES = {
   // Fluxos omnichannel
   INQUILINO: 'INQUILINO',
   PROPRIETARIO: 'PROPRIETARIO',
-  CAPTACAO: 'CAPTACAO',
+  CAPTACAO: 'CAPTACAO',         // proprietário quer deixar imóvel pra alugar
+  CAPTACAO_VENDA: 'CAPTACAO_VENDA', // proprietário quer vender o imóvel
 
   // Fluxo locação
   TRIAGEM_LOCACAO: 'TRIAGEM_LOCACAO',
@@ -33,6 +34,9 @@ const STATES = {
   // Fluxo compra
   TRIAGEM_COMPRA: 'TRIAGEM_COMPRA',
   INTERESSE_COMPRA: 'INTERESSE_COMPRA',
+
+  // Cessão de direitos
+  CESSAO_DIREITOS: 'CESSAO_DIREITOS',
 
   AGUARDANDO_JOAO: 'AGUARDANDO_JOAO',
   VISITA_AGENDADA: 'VISITA_AGENDADA',
@@ -95,28 +99,38 @@ function wantsToSeeProperties(text) {
 function detectFlow(text) {
   const lower = text.toLowerCase()
 
+  // Cessão de direitos — tem prioridade por ser específico
+  if (/cess[aã]o de direitos|ceder direitos|comprar cess[aã]o|vender cess[aã]o|cess[aã]o imóvel|direito do imóvel/.test(lower)) {
+    return STATES.CESSAO_DIREITOS
+  }
+
   // Inquilino — menção a boleto, manutenção, conserto, rescisão, desocupação
-  if (/boleto|2[aª] via|segunda via|vencimento|manutenção|manutencao|conserto|vazamento|infiltração|infiltracao|rescisão|rescisao|desocup|sair do imóvel|entregar o imóvel/.test(lower)) {
+  if (/boleto|2[aª] via|segunda via|vencimento|manutenção|manutencao|conserto|vazamento|infiltr[aã]|rescis[aã]|desocup|sair do imóvel|entregar o imóvel/.test(lower)) {
     return STATES.INQUILINO
   }
 
-  // Proprietário — repasse, administração do imóvel que possui
-  if (/repasse|quando (vou |eu )?(receber|cai|cair)|dia do pagamento|meu imóvel|minha casa|meu apartamento/.test(lower)) {
+  // Captação venda — proprietário quer vender o imóvel
+  if (/(quero |gostaria de |preciso ).*(vender|colocar [aà] venda|venda do meu|avaliar meu|avalia[çc][aã]o do meu)|(meu imóvel|minha casa|meu apartamento|meu terreno).*(vender|[aà] venda|venda)/.test(lower)) {
+    return STATES.CAPTACAO_VENDA
+  }
+
+  // Proprietário inquilino — repasse, administração do imóvel que possui alugado
+  if (/repasse|quando (vou |eu )?(receber|cai|cair)|dia do pagamento/.test(lower)) {
     return STATES.PROPRIETARIO
   }
 
-  // Captação — quer deixar imóvel pra alugar
+  // Captação locação — quer deixar imóvel pra alugar
   if (/(quero |tenho um |tenho uma ).*(alugar|locar|colocar pra alugar|disponível pra|disponivel pra)|captar|administr.*imóvel|imóvel.*administr/.test(lower)) {
     return STATES.CAPTACAO
   }
 
-  // Compra
-  if (/comprar|compra|à venda|a venda|financiar|financiamento|adquirir/.test(lower)) {
+  // Compra / financiamento
+  if (/comprar|compra|[aà] venda|financiar|financiamento|adquirir|procurando (um |uma )?(imóvel|casa|apê|apartamento)/.test(lower)) {
     return STATES.TRIAGEM_COMPRA
   }
 
   // Locação
-  if (/alugar|aluguel|locar|locação|locacao|quero (um |uma )?(casa|apê|apto|apartamento|kitnet)/.test(lower)) {
+  if (/alugar|aluguel|locar|loca[çc][aã]|quero (um |uma )?(casa|apê|apto|apartamento|kitnet)/.test(lower)) {
     return STATES.TRIAGEM_LOCACAO
   }
 
