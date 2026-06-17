@@ -331,7 +331,7 @@ function buildContextPrompt(session) {
     : ''
 
   const historyText = messages && messages.length > 0
-    ? `\nHistórico recente:\n${messages.slice(-10).map(m => `${m.role === 'user' ? 'Cliente' : 'Assistente'}: ${m.content}`).join('\n')}`
+    ? `\nHistórico recente:\n${messages.slice(-25).map(m => `${m.role === 'user' ? 'Cliente' : 'Assistente'}: ${m.content}`).join('\n')}`
     : ''
 
   // Bloco de relacionamento — instrui o Claude sobre quem é essa pessoa
