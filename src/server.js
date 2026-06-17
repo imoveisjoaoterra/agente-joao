@@ -117,7 +117,7 @@ app.post('/webhook', async (req, res) => {
     const nomeEfetivo = agendaName || pushName
     console.log(`[Webhook] Nova mensagem | De: ${phone} | Agenda: ${agendaName || '-'} | WhatsApp: ${pushName || '-'} | Texto: "${text}"`)
 
-    await processMessage(phone, text, nomeEfetivo)
+    await processMessage(phone, text, nomeEfetivo, !!agendaName)
 
   } catch (err) {
     console.error('[Webhook] Erro ao processar mensagem:', err.message)

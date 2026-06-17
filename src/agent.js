@@ -131,7 +131,7 @@ function detectNextState(text, currentState, profile) {
   if (currentState === STATES.INICIAL) {
     if (profile.nome) {
       const flow = detectFlow(text)
-      return flow || STATES.AGUARDANDO_NOME // AGUARDANDO_NOME aqui = aguardando intenção, não nome
+      return flow || STATES.TRIAGEM_LOCACAO // nome já conhecido — não cai em AGUARDANDO_NOME
     }
     return STATES.AGUARDANDO_NOME
   }
@@ -312,7 +312,7 @@ async function isAgentPausedGlobally() {
 }
 
 // Motor principal do agente
-async function processMessage(phone, userMessage, pushName) {
+async function processMessage(phone, userMessage, pushName, isAgendaContact = false) {
   console.log(`[Agente] Processando mensagem de ${phone}: "${userMessage}"`)
 
   // Verifica pausa global
@@ -421,7 +421,8 @@ async function processMessage(phone, userMessage, pushName) {
     state: confirmingVisit ? STATES.VISITA_AGENDADA : nextState,
     profile: updatedProfile,
     messages: [...(session.messages || []), { role: 'user', content: userMessage }],
-    imoveis
+    imoveis,
+    isAgendaContact
   })
 
   // Se sessão está aguardando João, ignora mensagem do cliente
