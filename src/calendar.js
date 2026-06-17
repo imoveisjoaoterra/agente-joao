@@ -119,14 +119,15 @@ async function createVisitEvent({ nome, phone, imovel, datetime }) {
     const auth = getAuth()
     const calendar = google.calendar({ version: 'v3', auth })
 
-    const start = new Date(datetime)
-    const end = new Date(start.getTime() + SLOT_DURATION * 60000)
+    // datetime vem em representação "Brasília como UTC" — converte para UTC real
+    const startUTC = brasiliaToUTC(new Date(datetime))
+    const endUTC = new Date(startUTC.getTime() + SLOT_DURATION * 60000)
 
     const event = {
       summary: `Visita — ${nome || phone}`,
       description: `Cliente: ${nome || 'não informado'}\nWhatsApp: ${phone}\nImóvel: ${imovel || 'a confirmar'}`,
-      start: { dateTime: start.toISOString(), timeZone: 'America/Sao_Paulo' },
-      end:   { dateTime: end.toISOString(),   timeZone: 'America/Sao_Paulo' }
+      start: { dateTime: startUTC.toISOString(), timeZone: 'America/Sao_Paulo' },
+      end:   { dateTime: endUTC.toISOString(),   timeZone: 'America/Sao_Paulo' }
     }
 
     const res = await calendar.events.insert({ calendarId: CALENDAR_ID, resource: event })
