@@ -251,11 +251,60 @@ module.exports.handleJoaoCommand = handleJoaoCommand
 // Endpoint de debug do calendário
 app.get('/debug-calendar', async (req, res) => {
   try {
-    const { getAvailableSlots } = require('./calendar')
-    const slots = await getAvailableSlots()
-    res.json({ ok: true, slots, calendarId: process.env.GOOGLE_CALENDAR_ID, hasCredentials: !!process.env.GOOGLE_SHEETS_CREDENTIALS })
+    const { google } = require('googleapis')
+    const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary'
+    const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS)
+    const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/calendar'] })
+    const cal = google.calendar({ version: 'v3', auth })
+
+    // Usa fuso de Brasília para calcular dias úteis
+    const nowBrasilia = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+    const d = new Date(nowBrasilia)
+    d.setHours(0, 0, 0, 0)
+    d.setDate(d.getDate() + 1)
+    const days = []
+    while (days.length < 3) {
+      const dow = d.getDay()
+      if (dow !== 0 && dow !== 6) days.push(new Date(d))
+      d.setDate(d.getDate() + 1)
+    }
+
+    // timeMin/timeMax em formato ISO com fuso de Brasília (UTC-3)
+    const toISO = (date, h, m) => {
+      const dt = new Date(date)
+      dt.setHours(h, m, 0, 0)
+      // converte de Brasília para UTC
+      return new Date(dt.getTime() + 3 * 3600000).toISOString()
+    }
+
+    const timeMin = toISO(days[0], 0, 0)
+    const timeMax = toISO(days[days.length - 1], 23, 59)
+
+    const evRes = await cal.events.list({ calendarId: CALENDAR_ID, timeMin, timeMax, singleEvents: true, orderBy: 'startTime' })
+    const events = (evRes.data.items || []).map(e => ({ summary: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date }))
+
+    // Testa slots manualmente
+    const suggestions = []
+    for (const day of days) {
+      if (suggestions.length >= 2) break
+      for (const h of [9, 10, 11, 14, 15, 16, 17]) {
+        if (suggestions.length >= 2) break
+        const isMorning = h < 12
+        if (isMorning && suggestions.some(s => s.h < 12)) continue
+        if (!isMorning && suggestions.some(s => s.h >= 12)) continue
+        const slotStartUTC = toISO(day, h, 0)
+        const slotEndUTC = toISO(day, h + 1, 0)
+        const busy = events.some(ev => {
+          const evS = new Date(ev.start); const evE = new Date(ev.end)
+          return new Date(slotStartUTC) < evE && new Date(slotEndUTC) > evS
+        })
+        if (!busy) suggestions.push({ day: day.toISOString(), h, slotStartUTC })
+      }
+    }
+
+    res.json({ ok: true, calendarId: CALENDAR_ID, nowBrasilia: nowBrasilia.toISOString(), timeMin, timeMax, days: days.map(x => x.toISOString()), eventsCount: events.length, events, suggestions, serverTime: new Date().toISOString() })
   } catch (err) {
-    res.json({ ok: false, error: err.message, stack: err.stack?.slice(0, 500) })
+    res.json({ ok: false, error: err.message })
   }
 })
 
