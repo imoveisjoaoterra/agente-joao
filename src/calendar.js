@@ -17,10 +17,21 @@ function getAuth() {
   })
 }
 
-// Próximos N dias úteis (seg-sex) a partir de hoje
+// Retorna "agora" no fuso de Brasília como objeto Date com horas corretas
+function nowBrasilia() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+}
+
+// Converte data em fuso Brasília para ISO UTC (para enviar à API do Google)
+function brasiliaToUTC(date) {
+  // Brasília é UTC-3
+  return new Date(date.getTime() + 3 * 3600000)
+}
+
+// Próximos N dias úteis (seg-sex) a partir de amanhã, no fuso de Brasília
 function nextBusinessDays(n = 3) {
   const days = []
-  const d = new Date()
+  const d = nowBrasilia()
   d.setHours(0, 0, 0, 0)
   d.setDate(d.getDate() + 1) // começa amanhã
   while (days.length < n) {
@@ -49,8 +60,9 @@ async function getAvailableSlots() {
     const calendar = google.calendar({ version: 'v3', auth })
 
     const days = nextBusinessDays(3)
-    const timeMin = days[0].toISOString()
-    const timeMax = new Date(days[days.length - 1].getTime() + 86400000).toISOString()
+    // Converte meia-noite de Brasília para UTC para a query da API
+    const timeMin = brasiliaToUTC(days[0]).toISOString()
+    const timeMax = brasiliaToUTC(new Date(days[days.length - 1].getTime() + 86400000)).toISOString()
 
     // Busca eventos já agendados no período
     const res = await calendar.events.list({
@@ -77,18 +89,20 @@ async function getAvailableSlots() {
         if (isMorning && suggestions.some(s => s.getHours() < 12)) continue
         if (!isMorning && suggestions.some(s => s.getHours() >= 12)) continue
 
-        const slotStart = new Date(day)
-        slotStart.setHours(startHour, 0, 0, 0)
+        // slot em Brasília, convertido para UTC para comparar com eventos da API
+        const slotBrasilia = new Date(day)
+        slotBrasilia.setHours(startHour, 0, 0, 0)
+        const slotStart = brasiliaToUTC(slotBrasilia)
         const slotEnd = new Date(slotStart.getTime() + SLOT_DURATION * 60000)
 
-        // Verifica se há conflito com eventos existentes
+        // Verifica conflito com eventos já agendados
         const busy = events.some(ev => {
           const evStart = new Date(ev.start?.dateTime || ev.start?.date)
           const evEnd = new Date(ev.end?.dateTime || ev.end?.date)
           return slotStart < evEnd && slotEnd > evStart
         })
 
-        if (!busy) suggestions.push(slotStart)
+        if (!busy) suggestions.push(slotBrasilia) // guarda em Brasília para formatação
       }
     }
 
