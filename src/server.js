@@ -12,6 +12,31 @@ app.use(express.json())
 
 const PORT = process.env.PORT || 3000
 
+// Debounce de mensagens — aguarda 4s antes de processar, juntando mensagens do mesmo número
+const messageQueues = new Map() // phone → { timer, messages[], nomeEfetivo, isAgendaContact }
+const DEBOUNCE_MS = 4000
+
+function enqueueMessage(phone, text, nomeEfetivo, isAgendaContact) {
+  const existing = messageQueues.get(phone) || { messages: [], nomeEfetivo, isAgendaContact }
+  existing.messages.push(text)
+  existing.nomeEfetivo = nomeEfetivo
+  existing.isAgendaContact = isAgendaContact
+
+  if (existing.timer) clearTimeout(existing.timer)
+
+  existing.timer = setTimeout(async () => {
+    const queued = messageQueues.get(phone)
+    if (!queued) return
+    messageQueues.delete(phone)
+
+    const combined = queued.messages.join('\n')
+    console.log(`[Debounce] ${phone} — ${queued.messages.length} msg(s) combinadas: "${combined}"`)
+    await processMessage(phone, combined, queued.nomeEfetivo, queued.isAgendaContact)
+  }, DEBOUNCE_MS)
+
+  messageQueues.set(phone, existing)
+}
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({
@@ -117,7 +142,7 @@ app.post('/webhook', async (req, res) => {
     const nomeEfetivo = agendaName || pushName
     console.log(`[Webhook] Nova mensagem | De: ${phone} | Agenda: ${agendaName || '-'} | WhatsApp: ${pushName || '-'} | Texto: "${text}"`)
 
-    await processMessage(phone, text, nomeEfetivo, !!agendaName)
+    enqueueMessage(phone, text, nomeEfetivo, !!agendaName)
 
   } catch (err) {
     console.error('[Webhook] Erro ao processar mensagem:', err.message)
